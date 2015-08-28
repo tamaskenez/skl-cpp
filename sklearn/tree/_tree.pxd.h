@@ -2,6 +2,7 @@
 #define _TREE_INCLUDED_23648023948234
 
 #include <cstdint>
+#include "sx/array_view.h"
 
 namespace sklcpp {
 // Authors: Gilles Louppe <g.louppe@gmail.com>
@@ -28,43 +29,141 @@ typedef uint32_t UINT32_t;      // Unsigned 32 bit integer
 // Criterion
 // =============================================================================
 
-cdef class Criterion:
-    // The criterion computes the impurity of a node and the reduction of
-    // impurity of a split on that node. It also computes the output statistics
-    // such as the mean in regression and class probabilities in classification.
+class Criterion {
+	/* Interface for impurity criteria.
 
-    // Internal structures
-    cdef DOUBLE_t* y                     // Values of y
-    cdef SIZE_t y_stride                 // Stride in y (since n_outputs >= 1)
-    cdef DOUBLE_t* sample_weight         // Sample weights
+	This object stores methods on how to calculate how good a split is using
+	different metrics.
+	*/
 
-    cdef SIZE_t* samples                 // Sample indices in X, y
-    cdef SIZE_t start                    // samples[start:pos] are the samples in the left node
-    cdef SIZE_t pos                      // samples[pos:end] are the samples in the right node
-    cdef SIZE_t end
+	// The criterion computes the impurity of a node and the reduction of
+	// impurity of a split on that node. It also computes the output statistics
+	// such as the mean in regression and class probabilities in classification.
 
-    cdef SIZE_t n_outputs                // Number of outputs
-    cdef SIZE_t n_node_samples           // Number of samples in the node (end-start)
-    cdef double weighted_n_samples       // Weighted number of samples (in total)
-    cdef double weighted_n_node_samples  // Weighted number of samples in the node
-    cdef double weighted_n_left          // Weighted number of samples in the left node
-    cdef double weighted_n_right         // Weighted number of samples in the right node
+protected:
+	// Internal structures
 
-    // The criterion object is maintained such that left and right collected
-    // statistics correspond to samples[start:pos] and samples[pos:end].
+	sx::strided_array_view<const DOUBLE_t, 2> y;  // Values of y, y[{sample_idx, output_idx}]
+	sx::array_view<const DOUBLE_t> sample_weight; // Sample weights
+
+	sx::array_view<const SIZE_t> samples;         // Sample indices in X, y
+	SIZE_t start;                           // samples[start:pos] are the samples in the left node
+	SIZE_t pos;                             // samples[pos:end] are the samples in the right node
+	SIZE_t end;
+
+	SIZE_t n_outputs;                       // Number of outputs
+	SIZE_t n_node_samples;                  // Number of samples in the node (end-start)
+	double weighted_n_samples;              // Weighted number of samples (in total)
+	double weighted_n_node_samples;         // Weighted number of samples in the node
+	double weighted_n_left;                 // Weighted number of samples in the left node
+	double weighted_n_right;                // Weighted number of samples in the right node
+
+public:
+	// The criterion object is maintained such that left and right collected
+	// statistics correspond to samples[start:pos] and samples[pos:end].
 
     // Methods
-    cdef void init(self, DOUBLE_t* y, SIZE_t y_stride, DOUBLE_t* sample_weight,
-                   double weighted_n_samples, SIZE_t* samples, SIZE_t start,
-                   SIZE_t end) nogil
-    cdef void reset(self) nogil
-    cdef void update(self, SIZE_t new_pos) nogil
-    cdef double node_impurity(self) nogil
-    cdef void children_impurity(self, double* impurity_left,
-                                double* impurity_right) nogil
-    cdef void node_value(self, double* dest) nogil
-    cdef double impurity_improvement(self, double impurity) nogil
+    Criterion(SIZE_t n_outputs);
 
+	virtual void init(sx::strided_array_view<const DOUBLE_t, 2> y, sx::array_view<const DOUBLE_t> sample_weight,
+		double weighted_n_samples, sx::array_view<const SIZE_t> samples, SIZE_t start,
+		SIZE_t end) = 0;
+    /* Placeholder for a method which will initialize the criterion.
+
+    Parameters
+    ----------
+    y: array-like, dtype=DOUBLE_t
+        y is a buffer that can store values for n_outputs target variables
+        index the ith sample and the kth output value as follows: y[i, k]
+    sample_weight: array-like, dtype=DOUBLE_t
+        The weight of each sample
+    weighted_n_samples: DOUBLE_t
+        The total weight of the samples being considered
+    samples: array-like, dtype=DOUBLE_t
+        Indices of the samples in X and y, where samples[start:end]
+        correspond to the samples in this node
+    start: SIZE_t
+        The first sample to be used on this node
+    end: SIZE_t
+        The last sample used on this node
+	*/
+
+    virtual void reset() = 0;
+	// Reset the criterion at pos=start.
+
+    virtual void update(SIZE_t new_pos) = 0;
+    /* Updated statistics by moving samples[pos:new_pos] to the left child.
+
+    This updates the collected statistics by moving samples[pos:new_pos]
+    from the right child to the left child. It must be implemented by
+    the subclass.
+
+    Parameters
+    ----------
+    new_pos: SIZE_t
+        New starting index position of the samples in the right child
+    */
+    virtual double node_impurity() const = 0;
+	/* Placeholder for calculating the impurity of the node.
+
+	Placeholder for a method which will evaluate the impurity of
+	the current node, i.e. the impurity of samples[start:end]. This is the
+	primary function of the criterion class.
+	*/
+
+    virtual void children_impurity(double* impurity_left, double* impurity_right) const = 0;
+    /* Placeholder for calculating the impurity of children.
+
+    Placeholder for a method which evaluates the impurity in
+    children nodes, i.e. the impurity of samples[start:pos] + the impurity
+    of samples[pos:end].
+
+    Parameters
+    ----------
+    impurity_left: double pointer
+        The memory address where the impurity of the left child should be
+        stored.
+    impurity_right: double pointer
+        The memory address where the impurity of the right child should be
+        stored
+    */
+
+    virtual void node_value(sx::array_view<double> dest) = 0;
+	/* Placeholder for storing the node value.
+
+	Placeholder for a method which will compute the node value
+	of samples[start:end] and save the value into dest.
+
+	Parameters
+	----------
+	dest: array of size n_outputs
+	The memory address where the node value should be stored.
+	*/
+
+	virtual double impurity_improvement(double impurity) const;
+	/* Placeholder for improvement in impurity after a split.
+
+	Placeholder for a method which computes the improvement
+	in impurity when a split occurs. The weighted impurity improvement
+	equation is the following:
+
+	N_t / N * (impurity - N_t_R / N_t * right_impurity
+	- N_t_L / N_t * left_impurity)
+
+	where N is the total number of samples, N_t is the number of samples
+	at the current node, N_t_L is the number of samples in the left child,
+	and N_t_R is the number of samples in the right child,
+
+	Parameters
+	----------
+	impurity: double
+	The initial impurity of the node before the split
+
+	Return
+	------
+	double: improvement in impurity after the split occurs
+	*/
+};
 
 #if 0
 	// =============================================================================
