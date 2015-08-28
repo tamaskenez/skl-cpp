@@ -1,6 +1,13 @@
+find_package(sx REQUIRED)
+
 file(GLOB_RECURSE files *.cpp *.h)
 
 add_library(sklcpp ${files})
+target_link_libraries(sklcpp PUBLIC sx)
+
+if(MSVC)
+	target_compile_definitions(sklcpp PRIVATE _SCL_SECURE_NO_WARNINGS)
+endif()
 
 target_include_directories(sklcpp
     PUBLIC
