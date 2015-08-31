@@ -58,14 +58,15 @@ protected:
 	double weighted_n_left;                 // Weighted number of samples in the left node
 	double weighted_n_right;                // Weighted number of samples in the right node
 
-public:
 	// The criterion object is maintained such that left and right collected
 	// statistics correspond to samples[start:pos] and samples[pos:end].
 
     // Methods
     Criterion(SIZE_t n_outputs);
 
-	virtual void init(sx::strided_array_view<const DOUBLE_t, 2> y, sx::array_view<const DOUBLE_t> sample_weight,
+public:
+
+    virtual void init(sx::strided_array_view<const DOUBLE_t, 2> y, sx::array_view<const DOUBLE_t> sample_weight,
 		double weighted_n_samples, sx::array_view<const SIZE_t> samples, SIZE_t start,
 		SIZE_t end) = 0;
     /* Placeholder for a method which will initialize the criterion.
