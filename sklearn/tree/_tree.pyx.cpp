@@ -428,9 +428,10 @@ public:
         *impurity_right = total_right / n_outputs;
     }
 };
-#if 0
 
-cdef class Gini(ClassificationCriterion):
+class Gini
+    : public ClassificationCriterion {
+public:
     /* Gini Index impurity criterion.
 
     This handles cases where the target is a classification taking values
@@ -447,40 +448,29 @@ cdef class Gini(ClassificationCriterion):
               = 1 - \sum_{k=0}^{K-1} count_k ** 2
     */
 
-    cdef double node_impurity(self) nogil:
+    virtual double node_impurity() const override {
         /* Evaluate the impurity of the current node, i.e. the impurity of
         samples[start:end] using the Gini criterion.*/
 
-        cdef double weighted_n_node_samples = self.weighted_n_node_samples
+        double total = 0.0;
 
-        cdef SIZE_t n_outputs = self.n_outputs
-        cdef SIZE_t* n_classes = self.n_classes
-        cdef SIZE_t label_count_stride = self.label_count_stride
-        cdef double* label_count_total = self.label_count_total
+        for(auto k: range(n_outputs)) {
+            auto gini = 0.0;
 
-        cdef double gini = 0.0
-        cdef double total = 0.0
-        cdef double count_k
-        cdef SIZE_t k
-        cdef SIZE_t c
-
-        for k in range(n_outputs):
-            gini = 0.0
-
-            for c in range(n_classes[k]):
-                count_k = label_count_total[c]
-                gini += count_k * count_k
-
+            for(auto c: range(n_classes.count(k))) {
+                auto count_k = label_count_total[n_classes.idx(k, c)];
+                gini += count_k * count_k;
+            }
             gini = 1.0 - gini / (weighted_n_node_samples *
-                                 weighted_n_node_samples)
+                                 weighted_n_node_samples);
 
-            total += gini
-            label_count_total += label_count_stride
+            total += gini;
+        }
+        return total / n_outputs;
+    }
 
-        return total / n_outputs
-
-    cdef void children_impurity(self, double* impurity_left,
-                                double* impurity_right) nogil:
+    virtual void children_impurity(double* impurity_left,
+                                   double* impurity_right) const override {
         /* Evaluate the impurity in children nodes
 
         i.e. the impurity of the left child (samples[start:pos]) and the
@@ -494,51 +484,38 @@ cdef class Gini(ClassificationCriterion):
             The memory address to save the impurity of the right node to
         */
 
-        cdef double weighted_n_node_samples = self.weighted_n_node_samples
-        cdef double weighted_n_left = self.weighted_n_left
-        cdef double weighted_n_right = self.weighted_n_right
+        double total_left = 0.0;
+        double total_right = 0.0;
 
-        cdef SIZE_t n_outputs = self.n_outputs
-        cdef SIZE_t* n_classes = self.n_classes
-        cdef SIZE_t label_count_stride = self.label_count_stride
-        cdef double* label_count_left = self.label_count_left
-        cdef double* label_count_right = self.label_count_right
+        for(auto k: range(n_outputs)) {
+            auto gini_left = 0.0;
+            auto gini_right = 0.0;
 
-        cdef double gini_left = 0.0
-        cdef double gini_right = 0.0
-        cdef double total = 0.0
-        cdef double total_left = 0.0
-        cdef double total_right = 0.0
-        cdef double count_k
-        cdef SIZE_t k
-        cdef SIZE_t c
+            for(auto c: range(n_classes.count(k))) {
+                auto idx = n_classes.idx(k, c);
+                auto count_k = label_count_left[idx];
+                gini_left += count_k * count_k;
 
-        for k in range(n_outputs):
-            gini_left = 0.0
-            gini_right = 0.0
-
-            for c in range(n_classes[k]):
-                count_k = label_count_left[c]
-                gini_left += count_k * count_k
-
-                count_k = label_count_right[c]
-                gini_right += count_k * count_k
+                count_k = label_count_right[idx];
+                gini_right += count_k * count_k;
+            }
 
             gini_left = 1.0 - gini_left / (weighted_n_left *
-                                           weighted_n_left)
+                                           weighted_n_left);
 
             gini_right = 1.0 - gini_right / (weighted_n_right *
-                                             weighted_n_right)
+                                             weighted_n_right);
 
-            total_left += gini_left
-            total_right += gini_right
-            label_count_left += label_count_stride
-            label_count_right += label_count_stride
+            total_left += gini_left;
+            total_right += gini_right;
+        }
 
-        impurity_left[0] = total_left / n_outputs
-        impurity_right[0] = total_right / n_outputs
+        *impurity_left = total_left / n_outputs;
+        *impurity_right = total_right / n_outputs;
+    }
+};
 
-
+#if 0
 cdef class RegressionCriterion(Criterion):
     /* Abstract regression criterion.
 
