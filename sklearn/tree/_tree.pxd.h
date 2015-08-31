@@ -129,7 +129,7 @@ public:
         stored
     */
 
-    virtual void node_value(sx::array_view<double> dest) = 0;
+    virtual void node_value(sx::array_view<double> dest) const = 0;
 	/* Placeholder for storing the node value.
 
 	Placeholder for a method which will compute the node value

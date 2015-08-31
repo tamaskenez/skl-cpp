@@ -333,7 +333,7 @@ public:
         pos = new_pos;
     }
 
-    virtual void node_value(sx::array_view<double> dest) override {
+    virtual void node_value(sx::array_view<double> dest) const override {
         /* Compute the node value of samples[start:end] and save it into dest.
 
         Parameters
@@ -515,8 +515,8 @@ public:
     }
 };
 
-#if 0
-cdef class RegressionCriterion(Criterion):
+class RegressionCriterion
+    : public Criterion {
     /* Abstract regression criterion.
 
     This handles cases where the target is a continuous value, and is
@@ -528,19 +528,49 @@ cdef class RegressionCriterion(Criterion):
             = (\sum_i^n y_i ** 2) - n_samples * y_bar ** 2
     */
 
-    cdef double* mean_left
-    cdef double* mean_right
-    cdef double* mean_total
-    cdef double* sq_sum_left
-    cdef double* sq_sum_right
-    cdef double* sq_sum_total
-    cdef double* var_left
-    cdef double* var_right
-    cdef double* sum_left
-    cdef double* sum_right
-    cdef double* sum_total
+    struct accumulators_t {
+        double mean_left;
+        double mean_right;
+        double mean_total;
+        double sq_sum_left;
+        double sq_sum_right;
+        double sq_sum_total;
+        double var_left;
+        double var_right;
+        double sum_left;
+        double sum_right;
+        double sum_total;
+        void set_zero() {
+            mean_left = 0.0;
+            mean_right = 0.0;
+            mean_total = 0.0;
+            sq_sum_left = 0.0;
+            sq_sum_right = 0.0;
+            sq_sum_total = 0.0;
+            var_left = 0.0;
+            var_right = 0.0;
+            sum_left = 0.0;
+            sum_right = 0.0;
+            sum_total = 0.0;
+        }
+    };
 
-    def __cinit__(self, SIZE_t n_outputs):
+    accumulators_t first_output_accumulators;
+    std::vector<accumulators_t> remaining_outputs_accumulators;
+
+    inline accumulators_t& accu(SIZE_t idx) {
+        return idx == 0
+            ? first_output_accumulators
+            : remaining_outputs_accumulators[idx-1];
+    }
+    inline const accumulators_t& accu(SIZE_t idx) const {
+        return idx == 0
+        ? first_output_accumulators
+        : remaining_outputs_accumulators[idx-1];
+    }
+
+    RegressionCriterion(SIZE_t n_outputs)
+    : Criterion(n_outputs) {
         /* Initialize parameters for this criterion.
 
         Parameters
@@ -549,269 +579,133 @@ cdef class RegressionCriterion(Criterion):
             The number of targets to be predicted
         */
 
-        // Default values
-        self.y = NULL
-        self.y_stride = 0
-        self.sample_weight = NULL
-
-        self.samples = NULL
-        self.start = 0
-        self.pos = 0
-        self.end = 0
-
-        self.n_outputs = n_outputs
-        self.n_node_samples = 0
-        self.weighted_n_node_samples = 0.0
-        self.weighted_n_left = 0.0
-        self.weighted_n_right = 0.0
-
-        // Allocate accumulators. Make sure they are NULL, not uninitialized,
-        // before an exception can be raised (which triggers __dealloc__).
-        self.mean_left = NULL
-        self.mean_right = NULL
-        self.mean_total = NULL
-        self.sq_sum_left = NULL
-        self.sq_sum_right = NULL
-        self.sq_sum_total = NULL
-        self.var_left = NULL
-        self.var_right = NULL
-        self.sum_left = NULL
-        self.sum_right = NULL
-        self.sum_total = NULL
-
         // Allocate memory for the accumulators
-        self.mean_left = <double*> calloc(n_outputs, sizeof(double))
-        self.mean_right = <double*> calloc(n_outputs, sizeof(double))
-        self.mean_total = <double*> calloc(n_outputs, sizeof(double))
-        self.sq_sum_left = <double*> calloc(n_outputs, sizeof(double))
-        self.sq_sum_right = <double*> calloc(n_outputs, sizeof(double))
-        self.sq_sum_total = <double*> calloc(n_outputs, sizeof(double))
-        self.var_left = <double*> calloc(n_outputs, sizeof(double))
-        self.var_right = <double*> calloc(n_outputs, sizeof(double))
-        self.sum_left = <double*> calloc(n_outputs, sizeof(double))
-        self.sum_right = <double*> calloc(n_outputs, sizeof(double))
-        self.sum_total = <double*> calloc(n_outputs, sizeof(double))
+        if(n_outputs > 0)
+            remaining_outputs_accumulators.resize(n_outputs - 1);
+    }
 
-        if (self.mean_left == NULL or
-                self.mean_right == NULL or
-                self.mean_total == NULL or
-                self.sq_sum_left == NULL or
-                self.sq_sum_right == NULL or
-                self.sq_sum_total == NULL or
-                self.var_left == NULL or
-                self.var_right == NULL or
-                self.sum_left == NULL or
-                self.sum_right == NULL or
-                self.sum_total == NULL):
-            raise MemoryError()
-
-    def __dealloc__(self):
-        /* Destructor*/
-
-        free(self.mean_left)
-        free(self.mean_right)
-        free(self.mean_total)
-        free(self.sq_sum_left)
-        free(self.sq_sum_right)
-        free(self.sq_sum_total)
-        free(self.var_left)
-        free(self.var_right)
-        free(self.sum_left)
-        free(self.sum_right)
-        free(self.sum_total)
-
-    def __reduce__(self):
-        return (RegressionCriterion, (self.n_outputs,), self.__getstate__())
-
-    def __getstate__(self):
-        return {}
-
-    def __setstate__(self, d):
-        pass
-
-    cdef void init(self, DOUBLE_t* y, SIZE_t y_stride, DOUBLE_t* sample_weight,
-                   double weighted_n_samples, SIZE_t* samples, SIZE_t start,
-                   SIZE_t end) nogil:
+    virtual void init(
+        sx::strided_array_view<const DOUBLE_t, 2> y,
+        sx::array_view<const DOUBLE_t> sample_weight,
+        double weighted_n_samples,
+        sx::array_view<const SIZE_t> samples, SIZE_t start,
+        SIZE_t end) override {
         /* Initialize the criterion at node samples[start:end] and
            children samples[start:start] and samples[start:end].*/
         // Initialize fields
-        self.y = y
-        self.y_stride = y_stride
-        self.sample_weight = sample_weight
-        self.samples = samples
-        self.start = start
-        self.end = end
-        self.n_node_samples = end - start
-        self.weighted_n_samples = weighted_n_samples
-        cdef double weighted_n_node_samples = 0.
+        this->y = y;
+        this->sample_weight = sample_weight;
+        this->samples = samples;
+        this->start = start;
+        this->end = end;
+        n_node_samples = end - start;
+        this->weighted_n_samples = weighted_n_samples;
+        weighted_n_node_samples = 0.0;
 
         // Initialize accumulators
-        cdef SIZE_t n_outputs = self.n_outputs
-        cdef double* mean_left = self.mean_left
-        cdef double* mean_right = self.mean_right
-        cdef double* mean_total = self.mean_total
-        cdef double* sq_sum_left = self.sq_sum_left
-        cdef double* sq_sum_right = self.sq_sum_right
-        cdef double* sq_sum_total = self.sq_sum_total
-        cdef double* var_left = self.var_left
-        cdef double* var_right = self.var_right
-        cdef double* sum_left = self.sum_left
-        cdef double* sum_right = self.sum_right
-        cdef double* sum_total = self.sum_total
+        DOUBLE_t w = 1.0;
 
-        cdef SIZE_t i = 0
-        cdef SIZE_t p = 0
-        cdef SIZE_t k = 0
-        cdef DOUBLE_t y_ik = 0.0
-        cdef DOUBLE_t w_y_ik = 0.0
-        cdef DOUBLE_t w = 1.0
+        first_output_accumulators.set_zero();
+        for(auto&a: remaining_outputs_accumulators)
+            a.set_zero();
 
-        cdef SIZE_t n_bytes = n_outputs * sizeof(double)
-        memset(mean_left, 0, n_bytes)
-        memset(mean_right, 0, n_bytes)
-        memset(mean_total, 0, n_bytes)
-        memset(sq_sum_left, 0, n_bytes)
-        memset(sq_sum_right, 0, n_bytes)
-        memset(sq_sum_total, 0, n_bytes)
-        memset(var_left, 0, n_bytes)
-        memset(var_right, 0, n_bytes)
-        memset(sum_left, 0, n_bytes)
-        memset(sum_right, 0, n_bytes)
-        memset(sum_total, 0, n_bytes)
+        for(auto p: range(start, end)) {
+            auto i = samples[p];
 
-        for p in range(start, end):
-            i = samples[p]
+            if(!sample_weight.empty())
+                w = sample_weight[i];
 
-            if sample_weight != NULL:
-                w = sample_weight[i]
+            for(auto k: range(n_outputs)) {
+                auto y_ik = y[{i, k}];
+                auto w_y_ik = w * y_ik;
+                auto&a = accu(k);
+                a.sum_total += w_y_ik;
+                a.sq_sum_total += w_y_ik * y_ik;
+            }
+            weighted_n_node_samples += w;
+        }
 
-            for k in range(n_outputs):
-                y_ik = y[i * y_stride + k]
-                w_y_ik = w * y_ik
-                sum_total[k] += w_y_ik
-                sq_sum_total[k] += w_y_ik * y_ik
-
-            weighted_n_node_samples += w
-
-        self.weighted_n_node_samples = weighted_n_node_samples
-
-        for k in range(n_outputs):
-            mean_total[k] = sum_total[k] / weighted_n_node_samples
+        for(auto k: range(n_outputs)) {
+            auto&a = accu(k);
+            a.mean_total = a.sum_total / weighted_n_node_samples;
+        }
 
         // Reset to pos=start
-        self.reset()
+        reset();
+    }
 
-    cdef void reset(self) nogil:
+    virtual void reset() override {
         /* Reset the criterion at pos=start.*/
-        self.pos = self.start
+        pos = start;
 
-        self.weighted_n_left = 0.0
-        self.weighted_n_right = self.weighted_n_node_samples
+        weighted_n_left = 0.0;
+        weighted_n_right = weighted_n_node_samples;
 
-        cdef SIZE_t n_outputs = self.n_outputs
-        cdef double* mean_left = self.mean_left
-        cdef double* mean_right = self.mean_right
-        cdef double* mean_total = self.mean_total
-        cdef double* sq_sum_left = self.sq_sum_left
-        cdef double* sq_sum_right = self.sq_sum_right
-        cdef double* sq_sum_total = self.sq_sum_total
-        cdef double* var_left = self.var_left
-        cdef double* var_right = self.var_right
-        cdef double weighted_n_node_samples = self.weighted_n_node_samples
-        cdef double* sum_left = self.sum_left
-        cdef double* sum_right = self.sum_right
-        cdef double* sum_total = self.sum_total
+        for(auto k: range(n_outputs)) {
+            auto& a = accu(k);
+            a.mean_right = a.mean_total;
+            a.mean_left = 0.0;
+            a.sq_sum_right = a.sq_sum_total;
+            a.sq_sum_left = 0.0;
+            a.var_right = a.sq_sum_right / weighted_n_node_samples -
+                            a.mean_right * a.mean_right;
+            a.var_left = 0.0;
+            a.sum_right = a.sum_total;
+            a.sum_left = 0.0;
+        }
+    }
 
-        cdef SIZE_t k = 0
-
-        for k in range(n_outputs):
-            mean_right[k] = mean_total[k]
-            mean_left[k] = 0.0
-            sq_sum_right[k] = sq_sum_total[k]
-            sq_sum_left[k] = 0.0
-            var_right[k] = (sq_sum_right[k] / weighted_n_node_samples -
-                            mean_right[k] * mean_right[k])
-            var_left[k] = 0.0
-            sum_right[k] = sum_total[k]
-            sum_left[k] = 0.0
-
-    cdef void update(self, SIZE_t new_pos) nogil:
+    virtual void update(SIZE_t new_pos) override {
         /* Updated statistics by moving samples[pos:new_pos] to the left.*/
 
-        cdef DOUBLE_t* y = self.y
-        cdef SIZE_t y_stride = self.y_stride
-        cdef DOUBLE_t* sample_weight = self.sample_weight
-
-        cdef SIZE_t* samples = self.samples
-        cdef SIZE_t pos = self.pos
-
-        cdef SIZE_t n_outputs = self.n_outputs
-        cdef double* mean_left = self.mean_left
-        cdef double* mean_right = self.mean_right
-        cdef double* sq_sum_left = self.sq_sum_left
-        cdef double* sq_sum_right = self.sq_sum_right
-        cdef double* var_left = self.var_left
-        cdef double* var_right = self.var_right
-        cdef double* sum_left = self.sum_left
-        cdef double* sum_right = self.sum_right
-
-        cdef double weighted_n_left = self.weighted_n_left
-        cdef double weighted_n_right = self.weighted_n_right
-
-        cdef SIZE_t i
-        cdef SIZE_t p
-        cdef SIZE_t k
-        cdef DOUBLE_t w = 1.0
-        cdef DOUBLE_t diff_w = 0.0
-        cdef DOUBLE_t y_ik, w_y_ik
+        DOUBLE_t w = 1.0;
+        DOUBLE_t diff_w = 0.0;
 
         // Note: We assume start <= pos < new_pos <= end
-        for p in range(pos, new_pos):
-            i = samples[p]
+        assert(start <= pos && pos < new_pos && new_pos <= end);
+        for(auto p: range(pos, new_pos)) {
+            auto i = samples[p];
 
-            if sample_weight != NULL:
-                w = sample_weight[i]
+            if(!sample_weight.empty())
+                w = sample_weight[i];
 
-            for k in range(n_outputs):
-                y_ik = y[i * y_stride + k]
-                w_y_ik = w * y_ik
+            for(auto k: range(n_outputs)) {
+                auto y_ik = y[{i, k}];
+                auto w_y_ik = w * y_ik;
 
-                sum_left[k] += w_y_ik
-                sum_right[k] -= w_y_ik
+                auto& a = accu(k);
+                a.sum_left += w_y_ik;
+                a.sum_right -= w_y_ik;
 
-                sq_sum_left[k] += w_y_ik * y_ik
-                sq_sum_right[k] -= w_y_ik * y_ik
+                a.sq_sum_left += w_y_ik * y_ik;
+                a.sq_sum_right -= w_y_ik * y_ik;
+            }
+            diff_w += w;
+        }
 
-            diff_w += w
+        weighted_n_left += diff_w;
+        weighted_n_right -= diff_w;
 
-        weighted_n_left += diff_w
-        weighted_n_right -= diff_w
+        for(auto k: range(n_outputs)) {
+            auto&a = accu(k);
+            a.mean_left = a.sum_left / weighted_n_left;
+            a.mean_right = a.sum_right / weighted_n_right;
+            a.var_left = (a.sq_sum_left / weighted_n_left -
+                           a.mean_left * a.mean_left);
+            a.var_right = (a.sq_sum_right / weighted_n_right -
+                            a.mean_right * a.mean_right);
+        }
+    }
 
-        for k in range(n_outputs):
-            mean_left[k] = sum_left[k] / weighted_n_left
-            mean_right[k] = sum_right[k] / weighted_n_right
-            var_left[k] = (sq_sum_left[k] / weighted_n_left -
-                           mean_left[k] * mean_left[k])
-            var_right[k] = (sq_sum_right[k] / weighted_n_right -
-                            mean_right[k] * mean_right[k])
-
-        self.weighted_n_left = weighted_n_left
-        self.weighted_n_right = weighted_n_right
-
-        self.pos = new_pos
-
-    cdef double node_impurity(self) nogil:
-        pass
-
-    cdef void children_impurity(self, double* impurity_left,
-                                double* impurity_right) nogil:
-        pass
-
-    cdef void node_value(self, double* dest) nogil:
+    virtual void node_value(sx::array_view<double> dest) const override {
         /* Compute the node value of samples[start:end] into dest.*/
-        memcpy(dest, self.mean_total, self.n_outputs * sizeof(double))
+        assert(dest.size() == n_outputs);
+        for(auto k: range(n_outputs))
+            dest[k] = accu(k).mean_total;
+    }
+};
 
-
+#if 0
 cdef class MSE(RegressionCriterion):
     /* Mean squared error impurity criterion.
 
