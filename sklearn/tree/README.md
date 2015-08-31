@@ -12,20 +12,26 @@ tree.py
 _tree.pyx
     cdef class Criterion
     cdef class ClassificationCriterion(Criterion):
+
     cdef class Entropy(ClassificationCriterion):
     cdef class Gini(ClassificationCriterion):
     cdef class RegressionCriterion(Criterion):
+
     cdef class MSE(RegressionCriterion):
     cdef class FriedmanMSE(MSE):
     cdef class Splitter:
     cdef class BaseDenseSplitter(Splitter):
     cdef class BestSplitter(BaseDenseSplitter):
+
     cdef class RandomSplitter(BaseDenseSplitter):
     cdef class PresortBestSplitter(BaseDenseSplitter):
+
     cdef class BaseSparseSplitter(Splitter):
     cdef class BestSparseSplitter(BaseSparseSplitter):
+
     cdef class RandomSparseSplitter(BaseSparseSplitter):
     cdef class TreeBuilder:
+
     cdef class DepthFirstTreeBuilder(TreeBuilder):
     cdef class BestFirstTreeBuilder(TreeBuilder):
     cdef class Tree:
