@@ -527,7 +527,7 @@ class RegressionCriterion
         var = \sum_i^n (y_i - y_bar) ** 2
             = (\sum_i^n y_i ** 2) - n_samples * y_bar ** 2
     */
-
+protected:
     struct accumulators_t {
         double mean_left;
         double mean_right;
@@ -705,48 +705,46 @@ class RegressionCriterion
     }
 };
 
-#if 0
-cdef class MSE(RegressionCriterion):
+class MSE
+: public RegressionCriterion {
     /* Mean squared error impurity criterion.
 
         MSE = var_left + var_right
     */
-    cdef double node_impurity(self) nogil:
+    virtual double node_impurity() const override {
         /* Evaluate the impurity of the current node, i.e. the impurity of
            samples[start:end].*/
-        cdef SIZE_t n_outputs = self.n_outputs
-        cdef double* sq_sum_total = self.sq_sum_total
-        cdef double* mean_total = self.mean_total
-        cdef double weighted_n_node_samples = self.weighted_n_node_samples
-        cdef double total = 0.0
-        cdef SIZE_t k
+        double total = 0.0;
 
-        for k in range(n_outputs):
-            total += (sq_sum_total[k] / weighted_n_node_samples -
-                      mean_total[k] * mean_total[k])
+        for(auto k: range(n_outputs)) {
+            auto&a = accu(k);
+            total += (a.sq_sum_total / weighted_n_node_samples -
+                      a.mean_total * a.mean_total);
+        }
 
-        return total / n_outputs
+        return total / n_outputs;
+    }
 
-    cdef void children_impurity(self, double* impurity_left,
-                                double* impurity_right) nogil:
+    virtual void children_impurity(double* impurity_left,
+                                double* impurity_right) const override {
         /* Evaluate the impurity in children nodes, i.e. the impurity of the
            left child (samples[start:pos]) and the impurity the right child
            (samples[pos:end]).*/
-        cdef SIZE_t n_outputs = self.n_outputs
-        cdef double* var_left = self.var_left
-        cdef double* var_right = self.var_right
-        cdef double total_left = 0.0
-        cdef double total_right = 0.0
-        cdef SIZE_t k
+        double total_left = 0.0;
+        double total_right = 0.0;
 
-        for k in range(n_outputs):
-            total_left += var_left[k]
-            total_right += var_right[k]
+        for(auto k: range(n_outputs)) {
+            auto& a = accu(k);
+            total_left += a.var_left;
+            total_right += a.var_right;
+        }
 
-        impurity_left[0] = total_left / n_outputs
-        impurity_right[0] = total_right / n_outputs
+        *impurity_left = total_left / n_outputs;
+        *impurity_right = total_right / n_outputs;
+    }
+};
 
-
+#if 0
 cdef class FriedmanMSE(MSE):
     /* Mean squared error impurity criterion with improvement score by Friedman
 
