@@ -744,8 +744,8 @@ class MSE
     }
 };
 
-#if 0
-cdef class FriedmanMSE(MSE):
+class FriedmanMSE
+: public MSE {
     /* Mean squared error impurity criterion with improvement score by Friedman
 
     Uses the formula (35) in Friedmans original Gradient Boosting paper:
@@ -754,218 +754,118 @@ cdef class FriedmanMSE(MSE):
         improvement = n_left * n_right * diff^2 / (n_left + n_right)
     */
 
-    cdef double impurity_improvement(self, double impurity) nogil:
-        cdef SIZE_t n_outputs = self.n_outputs
-        cdef SIZE_t k
-        cdef double* sum_left = self.sum_left
-        cdef double* sum_right = self.sum_right
-        cdef double total_sum_left = 0.0
-        cdef double total_sum_right = 0.0
-        cdef double weighted_n_left = self.weighted_n_left
-        cdef double weighted_n_right = self.weighted_n_right
-        cdef double diff = 0.0
+    virtual double impurity_improvement(double impurity) const override {
+        double total_sum_left = 0.0;
+        double total_sum_right = 0.0;
 
-        for k in range(n_outputs):
-            total_sum_left += sum_left[k]
-            total_sum_right += sum_right[k]
+        for(auto k: range(n_outputs)) {
+            auto&a = accu(k);
+            total_sum_left += a.sum_left;
+            total_sum_right += a.sum_right;
+        }
 
-        total_sum_left = total_sum_left / n_outputs
-        total_sum_right = total_sum_right / n_outputs
-        diff = ((total_sum_left / weighted_n_left) -
-                (total_sum_right / weighted_n_right))
+        total_sum_left = total_sum_left / n_outputs;
+        total_sum_right = total_sum_right / n_outputs;
+        double diff = ((total_sum_left / weighted_n_left) -
+                (total_sum_right / weighted_n_right));
 
         return (weighted_n_left * weighted_n_right * diff * diff /
-                (weighted_n_left + weighted_n_right))
+                (weighted_n_left + weighted_n_right));
+    }
+};
 
 // =============================================================================
 // Splitter
 // =============================================================================
 
-cdef inline void _init_split(SplitRecord* self, SIZE_t start_pos) nogil:
-    self.impurity_left = INFINITY
-    self.impurity_right = INFINITY
-    self.pos = start_pos
-    self.feature = 0
-    self.threshold = 0.
-    self.improvement = -INFINITY
+inline void _init_split(SplitRecord* self, SIZE_t start_pos) {
+    self->impurity_left = INFINITY;
+    self->impurity_right = INFINITY;
+    self->pos = start_pos;
+    self->feature = 0;
+    self->threshold = 0.0;
+    self->improvement = -INFINITY;
+}
 
 
-cdef class Splitter:
-    /* Abstract splitter class.
-
-    Splitters are called by tree builders to find the best splits on both
-    sparse and dense data, one split at a time.
-    */
-
-    def __cinit__(self, Criterion criterion, SIZE_t max_features,
+Splitter::
+Splitter(Criterion* criterion, SIZE_t max_features,
                   SIZE_t min_samples_leaf, double min_weight_leaf,
-                  object random_state):
-        /*
-        Parameters
-        ----------
-        criterion: Criterion
-            The criterion to measure the quality of a split.
+                  std::default_random_engine* random_state)
+: criterion(criterion)
+, max_features(max_features)
+, min_samples_leaf(min_samples_leaf)
+, min_weight_leaf(min_weight_leaf)
+, random_state(random_state)
+, weighted_n_samples(0.0)
+, n_features(0)
+, start(0)
+, end(0)
+{}
 
-        max_features: SIZE_t
-            The maximal number of randomly selected features which can be
-            considered for a split.
+void Splitter::
+init(SIZE_t n_samples, SIZE_t n_features,
+       sx::strided_array_view<const DOUBLE_t, 2> y,
+       sx::array_view<const DOUBLE_t> sample_weight) {
 
-        min_samples_leaf: SIZE_t
-            The minimal number of samples each leaf can have, where splits
-            which would result in having less samples in a leaf are not
-            considered.
+    // Create a new array which will be used to store nonzero
+    // samples from the feature of interest
+    samples.clear();
+    samples.reserve(n_samples);
 
-        min_weight_leaf: double
-            The minimal weight each leaf can have, where the weight is the sum
-            of the weights of each sample in it.
+    weighted_n_samples = 0.0;
 
-        random_state: object
-            The user inputted random state to be used for pseudo-randomness
-        */
+    for(auto i: range(n_samples)) {
+        // Only work with positively weighted samples
+        if(sample_weight.empty() || sample_weight[i] != 0.0)
+            samples.push_back(i);
 
-        self.criterion = criterion
+        if(!sample_weight.empty())
+            weighted_n_samples += sample_weight[i];
+        else
+            weighted_n_samples += 1.0;
+    }
+    this->n_features = n_features;
+    features.resize(n_features);
 
-        self.samples = NULL
-        self.n_samples = 0
-        self.features = NULL
-        self.n_features = 0
-        self.feature_values = NULL
+    std::iota(BEGINEND(features), 0);
 
-        self.y = NULL
-        self.y_stride = 0
-        self.sample_weight = NULL
+    feature_values.resize(n_samples);
+    constant_features.resize(n_features);
 
-        self.max_features = max_features
-        self.min_samples_leaf = min_samples_leaf
-        self.min_weight_leaf = min_weight_leaf
-        self.random_state = random_state
+    this->y = y;
+    this->sample_weight = sample_weight;
+}
 
-    def __dealloc__(self):
-        /* Destructor.*/
+void Splitter::
+node_reset(SIZE_t start, SIZE_t end,
+             double* weighted_n_node_samples) {
 
-        free(self.samples)
-        free(self.features)
-        free(self.constant_features)
-        free(self.feature_values)
+    this->start = start;
+    this->end = end;
 
-    def __getstate__(self):
-        return {}
+    criterion->init(y,
+                    sample_weight,
+                    weighted_n_samples,
+                    samples,
+                    start,
+                    end);
 
-    def __setstate__(self, d):
-        pass
+    *weighted_n_node_samples = criterion->get_weighted_n_node_samples();
+}
 
-    cdef void init(self,
-                   object X,
-                   np.ndarray[DOUBLE_t, ndim=2, mode="c"] y,
-                   DOUBLE_t* sample_weight) except *:
-        /* Initialize the splitter.
+void Splitter::
+node_value(sx::array_view<double> dest) const {
+    criterion->node_value(dest);
+}
 
-        Take in the input data X, the target Y, and optional sample weights.
+double Splitter::
+node_impurity() const {
+    /* Return the impurity of the current node.*/
+    return criterion->node_impurity();
+}
 
-        Parameters
-        ----------
-        X: object
-            This contains the inputs. Usually it is a 2d numpy array.
-
-        y: numpy.ndarray, dtype=DOUBLE_t
-            This is the vector of targets, or true labels, for the samples
-
-        sample_weight: numpy.ndarray, dtype=DOUBLE_t (optional)
-            The weights of the samples, where higher weighted samples are fit
-            closer than lower weight samples. If not provided, all samples
-            are assumed to have uniform weight.
-        */
-
-        self.rand_r_state = self.random_state.randint(0, RAND_R_MAX)
-        cdef SIZE_t n_samples = X.shape[0]
-
-        // Create a new array which will be used to store nonzero
-        // samples from the feature of interest
-        cdef SIZE_t* samples = safe_realloc(&self.samples, n_samples)
-
-        cdef SIZE_t i, j
-        cdef double weighted_n_samples = 0.0
-        j = 0
-
-        for i in range(n_samples):
-            // Only work with positively weighted samples
-            if sample_weight == NULL or sample_weight[i] != 0.0:
-                samples[j] = i
-                j += 1
-
-            if sample_weight != NULL:
-                weighted_n_samples += sample_weight[i]
-            else:
-                weighted_n_samples += 1.0
-
-        // Number of samples is number of positively weighted samples
-        self.n_samples = j
-        self.weighted_n_samples = weighted_n_samples
-
-        cdef SIZE_t n_features = X.shape[1]
-        cdef SIZE_t* features = safe_realloc(&self.features, n_features)
-
-        for i in range(n_features):
-            features[i] = i
-
-        self.n_features = n_features
-
-        safe_realloc(&self.feature_values, n_samples)
-        safe_realloc(&self.constant_features, n_features)
-
-        self.y = <DOUBLE_t*> y.data
-        self.y_stride = <SIZE_t> y.strides[0] / <SIZE_t> y.itemsize
-
-        self.sample_weight = sample_weight
-
-    cdef void node_reset(self, SIZE_t start, SIZE_t end,
-                         double* weighted_n_node_samples) nogil:
-        /* Reset splitter on node samples[start:end].
-
-        Parameters
-        ----------
-        start: SIZE_t
-            The index of the first sample to consider
-        end: SIZE_t
-            The index of the last sample to consider
-        weighted_n_node_samples: numpy.ndarray, dtype=double pointer
-            The total weight of those samples
-        */
-
-        self.start = start
-        self.end = end
-
-        self.criterion.init(self.y,
-                            self.y_stride,
-                            self.sample_weight,
-                            self.weighted_n_samples,
-                            self.samples,
-                            start,
-                            end)
-
-        weighted_n_node_samples[0] = self.criterion.weighted_n_node_samples
-
-    cdef void node_split(self, double impurity, SplitRecord* split,
-                         SIZE_t* n_constant_features) nogil:
-        /* Find the best split on node samples[start:end].
-
-        This is a placeholder method. The majority of computation will be done
-        here.
-        */
-
-        pass
-
-    cdef void node_value(self, double* dest) nogil:
-        /* Copy the value of node samples[start:end] into dest.*/
-
-        self.criterion.node_value(dest)
-
-    cdef double node_impurity(self) nogil:
-        /* Return the impurity of the current node.*/
-
-        return self.criterion.node_impurity()
-
-
+#if 0
 cdef class BaseDenseSplitter(Splitter):
     cdef DTYPE_t* X
     cdef SIZE_t X_sample_stride

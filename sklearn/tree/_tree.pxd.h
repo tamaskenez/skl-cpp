@@ -2,6 +2,8 @@
 #define _TREE_INCLUDED_23648023948234
 
 #include <cstdint>
+#include <random>
+
 #include "sx/array_view.h"
 
 namespace sklcpp {
@@ -65,6 +67,8 @@ protected:
     Criterion(SIZE_t n_outputs);
 
 public:
+
+    double get_weighted_n_node_samples() const { return weighted_n_node_samples; }
 
     virtual void init(sx::strided_array_view<const DOUBLE_t, 2> y, sx::array_view<const DOUBLE_t> sample_weight,
 		double weighted_n_samples, sx::array_view<const SIZE_t> samples, SIZE_t start,
@@ -166,52 +170,56 @@ public:
 	*/
 };
 
-#if 0
+
 	// =============================================================================
 // Splitter
 // =============================================================================
 
-cdef struct SplitRecord:
+struct SplitRecord {
     // Data to track sample split
-    SIZE_t feature         // Which feature to split on.
-    SIZE_t pos             // Split samples array at the given position,
+    SIZE_t feature;        // Which feature to split on.
+    SIZE_t pos;            // Split samples array at the given position,
                            // i.e. count of samples below threshold for feature.
                            // pos is >= end if the node is a leaf.
-    double threshold       // Threshold to split at.
-    double improvement     // Impurity improvement given parent node.
-    double impurity_left   // Impurity of the left split.
-    double impurity_right  // Impurity of the right split.
+    double threshold;      // Threshold to split at.
+    double improvement;    // Impurity improvement given parent node.
+    double impurity_left;  // Impurity of the left split.
+    double impurity_right; // Impurity of the right split.
+};
 
 
-cdef class Splitter:
+class Splitter {
+    /* Abstract splitter class.
+
+    Splitters are called by tree builders to find the best splits on both
+    sparse and dense data, one split at a time.
+    */
+
     // The splitter searches in the input space for a feature and a threshold
     // to split the samples samples[start:end].
     //
     // The impurity computations are delegated to a criterion object.
 
     // Internal structures
-    cdef public Criterion criterion      // Impurity criterion
-    cdef public SIZE_t max_features      // Number of features to test
-    cdef public SIZE_t min_samples_leaf  // Min samples in a leaf
-    cdef public double min_weight_leaf   // Minimum weight in a leaf
+    Criterion* criterion;      // Impurity criterion
+    SIZE_t max_features;       // Number of features to test
+    SIZE_t min_samples_leaf;   // Min samples in a leaf
+    double min_weight_leaf;    // Minimum weight in a leaf
 
-    cdef object random_state             // Random state
-    cdef UINT32_t rand_r_state           // sklearn_rand_r random number state
+    std::default_random_engine* random_state;
 
-    cdef SIZE_t* samples                 // Sample indices in X, y
-    cdef SIZE_t n_samples                // X.shape[0]
-    cdef double weighted_n_samples       // Weighted number of samples
-    cdef SIZE_t* features                // Feature indices in X
-    cdef SIZE_t* constant_features       // Constant features indices
-    cdef SIZE_t n_features               // X.shape[1]
-    cdef DTYPE_t* feature_values         // temp. array holding feature values
+    std::vector<SIZE_t> samples;              // Sample indices in X, y
+    double weighted_n_samples;                // Weighted number of samples
+    std::vector<SIZE_t> features;             // Feature indices in X
+    std::vector<SIZE_t> constant_features;    // Constant features indices
+    SIZE_t n_features;                        // X.shape[1]
+    std::vector<DTYPE_t> feature_values;      // temp. array holding feature values
 
-    cdef SIZE_t start                    // Start position for the current node
-    cdef SIZE_t end                      // End position for the current node
+    SIZE_t start;                             // Start position for the current node
+    SIZE_t end;                               // End position for the current node
 
-    cdef DOUBLE_t* y
-    cdef SIZE_t y_stride
-    cdef DOUBLE_t* sample_weight
+    sx::strided_array_view<const DOUBLE_t, 2> y;
+    sx::array_view<const DOUBLE_t> sample_weight;
 
     // The samples vector `samples` is maintained by the Splitter object such
     // that the samples contained in a node are contiguous. With this setting,
@@ -230,21 +238,81 @@ cdef class Splitter:
     // This allows optimization with depth-based tree building.
 
     // Methods
-    cdef void init(self, object X, np.ndarray y,
-                   DOUBLE_t* sample_weight) except *
 
-    cdef void node_reset(self, SIZE_t start, SIZE_t end,
-                         double* weighted_n_node_samples) nogil
+    Splitter(Criterion* criterion, SIZE_t max_features,
+                      SIZE_t min_samples_leaf, double min_weight_leaf,
+                      std::default_random_engine* random_state);
+    /*
+    Parameters
+    ----------
+    criterion: Criterion
+      The criterion to measure the quality of a split.
 
-    cdef void node_split(self,
-                         double impurity,   // Impurity of the node
+    max_features: SIZE_t
+      The maximal number of randomly selected features which can be
+      considered for a split.
+
+    min_samples_leaf: SIZE_t
+      The minimal number of samples each leaf can have, where splits
+      which would result in having less samples in a leaf are not
+      considered.
+
+    min_weight_leaf: double
+      The minimal weight each leaf can have, where the weight is the sum
+      of the weights of each sample in it.
+
+    random_state: object
+      The user inputted random state to be used for pseudo-randomness
+    */
+
+
+    void init(SIZE_t n_samples, SIZE_t n_features,
+              sx::strided_array_view<const DOUBLE_t, 2> y,
+              sx::array_view<const DOUBLE_t> sample_weight);
+    /* Initialize the splitter.
+
+    Take in the input data X, the target Y, and optional sample weights.
+
+    Parameters
+    ----------
+    X: object
+       This contains the inputs. Usually it is a 2d numpy array.
+
+    y: numpy.ndarray, dtype=DOUBLE_t
+       This is the vector of targets, or true labels, for the samples
+
+    sample_weight: numpy.ndarray, dtype=DOUBLE_t (optional)
+       The weights of the samples, where higher weighted samples are fit
+       closer than lower weight samples. If not provided, all samples
+       are assumed to have uniform weight.
+    */
+
+    void node_reset(SIZE_t start, SIZE_t end,
+                    double* weighted_n_node_samples);
+     /* Reset splitter on node samples[start:end].
+
+     Parameters
+     ----------
+     start: SIZE_t
+         The index of the first sample to consider
+     end: SIZE_t
+         The index of the last sample to consider
+     weighted_n_node_samples: numpy.ndarray, dtype=double pointer
+         The total weight of those samples
+     */
+
+    virtual void node_split(double impurity,   // Impurity of the node
                          SplitRecord* split,
-                         SIZE_t* n_constant_features) nogil
+                         SIZE_t* n_constant_features) = 0;
+    /* Find the best split on node samples[start:end]. */
 
-    cdef void node_value(self, double* dest) nogil
+    void node_value(sx::array_view<double> dest) const;
+    /* Copy the value of node samples[start:end] into dest.*/
 
-    cdef double node_impurity(self) nogil
+    double node_impurity() const;
+};
 
+#if 0
 
 // =============================================================================
 // Tree
