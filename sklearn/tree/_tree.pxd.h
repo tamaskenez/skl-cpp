@@ -69,6 +69,8 @@ protected:
 public:
 
     double get_weighted_n_node_samples() const { return weighted_n_node_samples; }
+    double get_weighted_n_left() const { return weighted_n_left; }
+    double get_weighted_n_right() const { return weighted_n_right; }
 
     virtual void init(sx::strided_array_view<const DOUBLE_t, 2> y, sx::array_view<const DOUBLE_t> sample_weight,
 		double weighted_n_samples, sx::array_view<const SIZE_t> samples, SIZE_t start,
@@ -201,24 +203,25 @@ class Splitter {
     // The impurity computations are delegated to a criterion object.
 
     // Internal structures
+protected:
     Criterion* criterion;      // Impurity criterion
     SIZE_t max_features;       // Number of features to test
     SIZE_t min_samples_leaf;   // Min samples in a leaf
     double min_weight_leaf;    // Minimum weight in a leaf
-
     std::default_random_engine* random_state;
-
     std::vector<SIZE_t> samples;              // Sample indices in X, y
+private:
     SIZE_t n_samples;                         // X.shape[0]
     double weighted_n_samples;                // Weighted number of samples
+protected:
     std::vector<SIZE_t> features;             // Feature indices in X
     std::vector<SIZE_t> constant_features;    // Constant features indices
     SIZE_t n_features;                        // X.shape[1]
     std::vector<DTYPE_t> feature_values;      // temp. array holding feature values
-
     SIZE_t start;                             // Start position for the current node
     SIZE_t end;                               // End position for the current node
 
+private:
     sx::strided_array_view<const DOUBLE_t, 2> y;
     sx::array_view<const DOUBLE_t> sample_weight;
 
