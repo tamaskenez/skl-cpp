@@ -209,6 +209,7 @@ class Splitter {
     std::default_random_engine* random_state;
 
     std::vector<SIZE_t> samples;              // Sample indices in X, y
+    SIZE_t n_samples;                         // X.shape[0]
     double weighted_n_samples;                // Weighted number of samples
     std::vector<SIZE_t> features;             // Feature indices in X
     std::vector<SIZE_t> constant_features;    // Constant features indices
@@ -238,7 +239,7 @@ class Splitter {
     // This allows optimization with depth-based tree building.
 
     // Methods
-
+protected:
     Splitter(Criterion* criterion, SIZE_t max_features,
                       SIZE_t min_samples_leaf, double min_weight_leaf,
                       std::default_random_engine* random_state);
@@ -265,8 +266,8 @@ class Splitter {
       The user inputted random state to be used for pseudo-randomness
     */
 
-
-    void init(SIZE_t n_samples, SIZE_t n_features,
+public:
+    virtual void init(sx::strided_array_view<const DTYPE_t, 2> X,
               sx::strided_array_view<const DOUBLE_t, 2> y,
               sx::array_view<const DOUBLE_t> sample_weight);
     /* Initialize the splitter.

@@ -797,6 +797,7 @@ Splitter(Criterion* criterion, SIZE_t max_features,
 , min_samples_leaf(min_samples_leaf)
 , min_weight_leaf(min_weight_leaf)
 , random_state(random_state)
+, n_samples(0)
 , weighted_n_samples(0.0)
 , n_features(0)
 , start(0)
@@ -804,14 +805,14 @@ Splitter(Criterion* criterion, SIZE_t max_features,
 {}
 
 void Splitter::
-init(SIZE_t n_samples, SIZE_t n_features,
-       sx::strided_array_view<const DOUBLE_t, 2> y,
-       sx::array_view<const DOUBLE_t> sample_weight) {
+init(sx::strided_array_view<const DTYPE_t, 2> X,
+          sx::strided_array_view<const DOUBLE_t, 2> y,
+          sx::array_view<const DOUBLE_t> sample_weight) {
 
     // Create a new array which will be used to store nonzero
     // samples from the feature of interest
     samples.clear();
-    samples.reserve(n_samples);
+    samples.reserve(X.bounds()[0]);
 
     weighted_n_samples = 0.0;
 
@@ -825,7 +826,9 @@ init(SIZE_t n_samples, SIZE_t n_features,
         else
             weighted_n_samples += 1.0;
     }
-    this->n_features = n_features;
+    n_samples = samples.size();
+
+    n_features = X.bounds()[1];
     features.resize(n_features);
 
     std::iota(BEGINEND(features), 0);
@@ -865,37 +868,31 @@ node_impurity() const {
     return criterion->node_impurity();
 }
 
-#if 0
-cdef class BaseDenseSplitter(Splitter):
-    cdef DTYPE_t* X
-    cdef SIZE_t X_sample_stride
-    cdef SIZE_t X_fx_stride
-
-    def __cinit__(self, Criterion criterion, SIZE_t max_features,
+class BaseDenseSplitter
+: public Splitter {
+    sx::strided_array_view<const DTYPE_t, 2> X;
+public:
+    BaseDenseSplitter(Criterion* criterion, SIZE_t max_features,
                   SIZE_t min_samples_leaf, double min_weight_leaf,
-                  object random_state):
+                  std::default_random_engine* random_state)
+    : Splitter(criterion, max_features, min_samples_leaf, min_weight_leaf,
+               random_state)
+    {}
 
-        self.X = NULL
-        self.X_sample_stride = 0
-        self.X_fx_stride = 0
-
-    cdef void init(self,
-                   object X,
-                   np.ndarray[DOUBLE_t, ndim=2, mode="c"] y,
-                   DOUBLE_t* sample_weight) except *:
+    virtual void init(sx::strided_array_view<const DTYPE_t, 2> X,
+              sx::strided_array_view<const DOUBLE_t, 2> y,
+              sx::array_view<const DOUBLE_t> sample_weight) override {
         /* Initialize the splitter.*/
 
         // Call parent init
-        Splitter.init(self, X, y, sample_weight)
+        Splitter::init(X, y, sample_weight);
 
         // Initialize X
-        cdef np.ndarray X_ndarray = X
+        this->X = X;
+    }
+};
 
-        self.X = <DTYPE_t*> X_ndarray.data
-        self.X_sample_stride = <SIZE_t> X.strides[0] / <SIZE_t> X.itemsize
-        self.X_fx_stride = <SIZE_t> X.strides[1] / <SIZE_t> X.itemsize
-
-
+#if 0
 cdef class BestSplitter(BaseDenseSplitter):
     /* Splitter for finding the best split.*/
     def __reduce__(self):
