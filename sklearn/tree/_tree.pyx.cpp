@@ -114,6 +114,13 @@ inline SIZE_t rand_int(SIZE_t low, SIZE_t high,
     return std::uniform_int_distribution<SIZE_t>(low, high-1)(random_state);
 }
 
+template<typename Generator>
+inline double rand_uniform(double low, double high,
+                           Generator& random_state) {
+    /* Generate a random double in [low; high).*/
+    return std::uniform_real_distribution<double>(low, high)(random_state);
+}
+
 // Sort n-element arrays pointed to by Xf and samples, simultaneously,
 // by the values in Xf. Algorithm: Introsort (Musser, SP&E, 1997).
 template<typename It1, typename It2>
@@ -121,7 +128,7 @@ void sort(It1 Xf, It2 samples, SIZE_t n) {
     auto it = sx::make_random_access_iterator_pair(Xf, samples);
     std::sort(it, it + n, sx::less_by_first());
 }
-    
+
 
 // =============================================================================
 // Criterion
@@ -1079,55 +1086,28 @@ class BestSplitter
 };
 
 
-#if 0
-cdef class RandomSplitter(BaseDenseSplitter):
+class RandomSplitter
+: public BaseDenseSplitter {
     /* Splitter for finding the best random split.*/
-    def __reduce__(self):
-        return (RandomSplitter, (self.criterion,
-                                 self.max_features,
-                                 self.min_samples_leaf,
-                                 self.min_weight_leaf,
-                                 self.random_state), self.__getstate__())
-
-    cdef void node_split(self, double impurity, SplitRecord* split,
-                         SIZE_t* n_constant_features) nogil:
+    virtual void node_split(double impurity, SplitRecord* split,
+                         SIZE_t* n_constant_features) override {
         /* Find the best random split on node samples[start:end].*/
         // Draw random splits and pick the best
-        cdef SIZE_t* samples = self.samples
-        cdef SIZE_t start = self.start
-        cdef SIZE_t end = self.end
+        auto& Xf = feature_values;
 
-        cdef SIZE_t* features = self.features
-        cdef SIZE_t* constant_features = self.constant_features
-        cdef SIZE_t n_features = self.n_features
+        SplitRecord best, current;
 
-        cdef DTYPE_t* X = self.X
-        cdef DTYPE_t* Xf = self.feature_values
-        cdef SIZE_t X_sample_stride = self.X_sample_stride
-        cdef SIZE_t X_fx_stride = self.X_fx_stride
-        cdef SIZE_t max_features = self.max_features
-        cdef SIZE_t min_samples_leaf = self.min_samples_leaf
-        cdef double min_weight_leaf = self.min_weight_leaf
-        cdef UINT32_t* random_state = &self.rand_r_state
-
-        cdef SplitRecord best, current
-
-        cdef SIZE_t f_i = n_features
-        cdef SIZE_t f_j, p, tmp
+        SIZE_t f_i = n_features;
         // Number of features discovered to be constant during the split search
-        cdef SIZE_t n_found_constants = 0
+        SIZE_t n_found_constants = 0;
         // Number of features known to be constant and drawn without replacement
-        cdef SIZE_t n_drawn_constants = 0
-        cdef SIZE_t n_known_constants = n_constant_features[0]
+        SIZE_t n_drawn_constants = 0;
+        SIZE_t n_known_constants = *n_constant_features;
         // n_total_constants = n_known_constants + n_found_constants
-        cdef SIZE_t n_total_constants = n_known_constants
-        cdef SIZE_t n_visited_features = 0
-        cdef DTYPE_t min_feature_value
-        cdef DTYPE_t max_feature_value
-        cdef DTYPE_t current_feature_value
-        cdef SIZE_t partition_end
+        SIZE_t n_total_constants = n_known_constants;
+        SIZE_t n_visited_features = 0;
 
-        _init_split(&best, end)
+        _init_split(&best, end);
 
         // Sample up to max_features without replacement using a
         // Fisher-Yates-based algorithm (using the local variables `f_i` and
@@ -1138,12 +1118,13 @@ cdef class RandomSplitter(BaseDenseSplitter):
         // for good splitting) by ancestor nodes and save the information on
         // newly discovered constant features to spare computation on descendant
         // nodes.
-        while (f_i > n_total_constants and  // Stop early if remaining features
-                                            // are constant
-                (n_visited_features < max_features or
+        while(f_i > n_total_constants &&   // Stop early if remaining features
+                                           // are constant
+                (n_visited_features < max_features ||
                  // At least one drawn features must be non constant
-                 n_visited_features <= n_found_constants + n_drawn_constants)):
-            n_visited_features += 1
+                 n_visited_features <= n_found_constants + n_drawn_constants)) {
+
+            ++n_visited_features;
 
             // Loop invariant: elements of features in
             // - [:n_drawn_constant[ holds drawn and known constant features;
@@ -1157,131 +1138,128 @@ cdef class RandomSplitter(BaseDenseSplitter):
             //   and aren't constant.
 
             // Draw a feature at random
-            f_j = rand_int(n_drawn_constants, f_i - n_found_constants,
-                           random_state)
+            SIZE_t f_j = rand_int(n_drawn_constants, f_i - n_found_constants,
+                           *random_state);
 
-            if f_j < n_known_constants:
+            if(f_j < n_known_constants) {
                 // f_j in the interval [n_drawn_constants, n_known_constants[
-                tmp = features[f_j]
-                features[f_j] = features[n_drawn_constants]
-                features[n_drawn_constants] = tmp
-
-                n_drawn_constants += 1
-
-            else:
+                std::swap(features[f_j], features[n_drawn_constants]);
+                ++n_drawn_constants;
+            } else {
                 // f_j in the interval [n_known_constants, f_i - n_found_constants[
-                f_j += n_found_constants
+                f_j += n_found_constants;
                 // f_j in the interval [n_total_constants, f_i[
 
-                current.feature = features[f_j]
+                current.feature = features[f_j];
 
                 // Find min, max
-                min_feature_value = X[X_sample_stride * samples[start] +
-                                      X_fx_stride * current.feature]
-                max_feature_value = min_feature_value
-                Xf[start] = min_feature_value
+                DTYPE_t min_feature_value = X[{samples[start], current.feature}];
+                DTYPE_t max_feature_value = min_feature_value;
+                Xf[start] = min_feature_value;
 
-                for p in range(start + 1, end):
-                    current_feature_value = X[X_sample_stride * samples[p] +
-                                              X_fx_stride * current.feature]
-                    Xf[p] = current_feature_value
+                for(auto p: range(start + 1, end)) {
+                    DTYPE_t current_feature_value =
+                        X[{samples[p], current.feature}];
+                    Xf[p] = current_feature_value;
 
-                    if current_feature_value < min_feature_value:
-                        min_feature_value = current_feature_value
-                    elif current_feature_value > max_feature_value:
-                        max_feature_value = current_feature_value
+                    if(current_feature_value < min_feature_value)
+                        min_feature_value = current_feature_value;
+                    else if(current_feature_value > max_feature_value)
+                        max_feature_value = current_feature_value;
+                }
+                if(max_feature_value <= min_feature_value + FEATURE_THRESHOLD) {
+                    features[f_j] = features[n_total_constants];
+                    features[n_total_constants] = current.feature;
 
-                if max_feature_value <= min_feature_value + FEATURE_THRESHOLD:
-                    features[f_j] = features[n_total_constants]
-                    features[n_total_constants] = current.feature
-
-                    n_found_constants += 1
-                    n_total_constants += 1
-
-                else:
-                    f_i -= 1
-                    features[f_i], features[f_j] = features[f_j], features[f_i]
+                    ++n_found_constants;
+                    ++n_total_constants;
+                } else {
+                    --f_i;
+                    std::swap(features[f_i], features[f_j]);
 
                     // Draw a random threshold
                     current.threshold = rand_uniform(min_feature_value,
                                                      max_feature_value,
-                                                     random_state)
+                                                     *random_state);
 
-                    if current.threshold == max_feature_value:
-                        current.threshold = min_feature_value
+                    if(current.threshold == max_feature_value)
+                        current.threshold = min_feature_value;
 
                     // Partition
-                    partition_end = end
-                    p = start
-                    while p < partition_end:
-                        current_feature_value = Xf[p]
-                        if current_feature_value <= current.threshold:
-                            p += 1
-                        else:
-                            partition_end -= 1
+                    SIZE_t partition_end = end;
+                    SIZE_t p = start;
+                    while(p < partition_end) {
+                        DTYPE_t current_feature_value = Xf[p];
+                        if(current_feature_value <= current.threshold)
+                            ++p;
+                        else {
+                            --partition_end;
 
-                            Xf[p] = Xf[partition_end]
-                            Xf[partition_end] = current_feature_value
+                            Xf[p] = Xf[partition_end];
+                            Xf[partition_end] = current_feature_value;
 
-                            tmp = samples[partition_end]
-                            samples[partition_end] = samples[p]
-                            samples[p] = tmp
-
-                    current.pos = partition_end
+                            std::swap(samples[partition_end], samples[p]);
+                        }
+                    }
+                    current.pos = partition_end;
 
                     // Reject if min_samples_leaf is not guaranteed
-                    if (((current.pos - start) < min_samples_leaf) or
-                            ((end - current.pos) < min_samples_leaf)):
-                        continue
+                    if((((current.pos - start) < min_samples_leaf) ||
+                            ((end - current.pos) < min_samples_leaf))) {
+                        continue;
+                    }
 
                     // Evaluate split
-                    self.criterion.reset()
-                    self.criterion.update(current.pos)
+                    criterion->reset();
+                    criterion->update(current.pos);
 
                     // Reject if min_weight_leaf is not satisfied
-                    if ((self.criterion.weighted_n_left < min_weight_leaf) or
-                            (self.criterion.weighted_n_right < min_weight_leaf)):
-                        continue
+                    if(((criterion->get_weighted_n_left() < min_weight_leaf) ||
+                            (criterion->get_weighted_n_right() < min_weight_leaf))) {
+                        continue;
+                    }
 
-                    current.improvement = self.criterion.impurity_improvement(impurity)
+                    current.improvement = criterion->impurity_improvement(impurity);
 
-                    if current.improvement > best.improvement:
-                        self.criterion.children_impurity(&current.impurity_left,
-                                                         &current.impurity_right)
-                        best = current  // copy
-
+                    if(current.improvement > best.improvement) {
+                        criterion->children_impurity(&current.impurity_left,
+                                                         &current.impurity_right);
+                        best = current;  // copy
+                    }
+                } // else of if(max_feature_value <= min_feature_value + FEATURE_THRESHOLD)
+            } // else of if(f_j < n_known_constants)
+        } //big while
         // Reorganize into samples[start:best.pos] + samples[best.pos:end]
-        if best.pos < end and current.feature != best.feature:
-            partition_end = end
-            p = start
+        if(best.pos < end && current.feature != best.feature) {
+            SIZE_t partition_end = end;
+            SIZE_t p = start;
 
-            while p < partition_end:
-                if X[X_sample_stride * samples[p] +
-                     X_fx_stride * best.feature] <= best.threshold:
-                    p += 1
-
-                else:
-                    partition_end -= 1
-
-                    tmp = samples[partition_end]
-                    samples[partition_end] = samples[p]
-                    samples[p] = tmp
-
+            while(p < partition_end) {
+                if(X[{samples[p], best.feature}] <= best.threshold)
+                    ++p;
+                else {
+                    --partition_end;
+                    std::swap(samples[partition_end], samples[p]);
+                }
+            }
+        }
         // Respect invariant for constant features: the original order of
         // element in features[:n_known_constants] must be preserved for sibling
         // and child nodes
-        memcpy(features, constant_features, sizeof(SIZE_t) * n_known_constants)
+        std::copy_n(constant_features.begin(), n_known_constants,
+            features.begin());
 
         // Copy newly found constant features
-        memcpy(constant_features + n_known_constants,
-               features + n_known_constants,
-               sizeof(SIZE_t) * n_found_constants)
+        std::copy_n(features.begin() + n_known_constants, n_found_constants,
+            constant_features.begin() + n_known_constants);
 
         // Return values
-        split[0] = best
-        n_constant_features[0] = n_total_constants
+        *split = best;
+        *n_constant_features = n_total_constants;
+    }
+};
 
-
+#if 0
 cdef class PresortBestSplitter(BaseDenseSplitter):
     /* Splitter for finding the best split, using presorting.*/
     cdef DTYPE_t* X_old
@@ -3192,11 +3170,6 @@ cdef inline np.ndarray sizet_ptr_to_ndarray(SIZE_t* data, SIZE_t size):
     shape[0] = <np.npy_intp> size
     return np.PyArray_SimpleNewFromData(1, shape, np.NPY_INTP, data)
 
-cdef inline double rand_uniform(double low, double high,
-                                UINT32_t* random_state) nogil:
-    /* Generate a random double in [low; high).*/
-    return ((high - low) * <double> our_rand_r(random_state) /
-            <double> RAND_R_MAX) + low
 
 cdef inline double log(double x) nogil:
     return ln(x) / ln(2.0)
