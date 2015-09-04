@@ -46,9 +46,9 @@ protected:
 	// Internal structures
 
 	sx::strided_array_view<const DOUBLE_t, 2> y;  // Values of y, y[{sample_idx, output_idx}]
-	sx::array_view<const DOUBLE_t> sample_weight; // Sample weights
+	sx::strided_array_view<const DOUBLE_t> sample_weight; // Sample weights
 
-	sx::array_view<const SIZE_t> samples;         // Sample indices in X, y
+	sx::strided_array_view<const SIZE_t> samples;         // Sample indices in X, y
 	SIZE_t start;                           // samples[start:pos] are the samples in the left node
 	SIZE_t pos;                             // samples[pos:end] are the samples in the right node
 	SIZE_t end;
@@ -72,8 +72,8 @@ public:
     double get_weighted_n_left() const { return weighted_n_left; }
     double get_weighted_n_right() const { return weighted_n_right; }
 
-    virtual void init(sx::strided_array_view<const DOUBLE_t, 2> y, sx::array_view<const DOUBLE_t> sample_weight,
-		double weighted_n_samples, sx::array_view<const SIZE_t> samples, SIZE_t start,
+    virtual void init(sx::strided_array_view<const DOUBLE_t, 2> y, sx::strided_array_view<const DOUBLE_t> sample_weight,
+		double weighted_n_samples, sx::strided_array_view<const SIZE_t> samples, SIZE_t start,
 		SIZE_t end) = 0;
     /* Placeholder for a method which will initialize the criterion.
 
@@ -135,7 +135,7 @@ public:
         stored
     */
 
-    virtual void node_value(sx::array_view<double> dest) const = 0;
+    virtual void node_value(std::vector<double>* dest) const = 0;
 	/* Placeholder for storing the node value.
 
 	Placeholder for a method which will compute the node value
@@ -223,7 +223,7 @@ protected:
 
 private:
     sx::strided_array_view<const DOUBLE_t, 2> y;
-    sx::array_view<const DOUBLE_t> sample_weight;
+    sx::strided_array_view<const DOUBLE_t> sample_weight;
 
     // The samples vector `samples` is maintained by the Splitter object such
     // that the samples contained in a node are contiguous. With this setting,
@@ -272,7 +272,7 @@ protected:
 public:
     virtual void init(sx::strided_array_view<const DTYPE_t, 2> X,
               sx::strided_array_view<const DOUBLE_t, 2> y,
-              sx::array_view<const DOUBLE_t> sample_weight);
+              sx::strided_array_view<const DOUBLE_t> sample_weight);
     /* Initialize the splitter.
 
     Take in the input data X, the target Y, and optional sample weights.
@@ -310,7 +310,7 @@ public:
                          SIZE_t* n_constant_features) = 0;
     /* Find the best split on node samples[start:end]. */
 
-    void node_value(sx::array_view<double> dest) const;
+    void node_value(std::vector<double>* dest) const;
     /* Copy the value of node samples[start:end] into dest.*/
 
     double node_impurity() const;

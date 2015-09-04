@@ -7,6 +7,7 @@
 #include "sx/abbrev.h"
 #include "sx/range.h"
 #include "sx/random_access_iterator_pair.h"
+#include "sx/multi_array.h"
 
 namespace sklcpp {
 
@@ -245,8 +246,8 @@ protected:
     }
 
 public:
-    virtual void init(sx::strided_array_view<const DOUBLE_t, 2> y, sx::array_view<const DOUBLE_t> sample_weight,
-        double weighted_n_samples, sx::array_view<const SIZE_t> samples, SIZE_t start,
+    virtual void init(sx::strided_array_view<const DOUBLE_t, 2> y, sx::strided_array_view<const DOUBLE_t> sample_weight,
+        double weighted_n_samples, sx::strided_array_view<const SIZE_t> samples, SIZE_t start,
         SIZE_t end) override {
     /* Initialize the criterion at node samples[start:end] and
     children samples[start:start] and samples[start:end].
@@ -357,7 +358,7 @@ public:
         pos = new_pos;
     }
 
-    virtual void node_value(sx::array_view<double> dest) const override {
+    virtual void node_value(std::vector<double>* dest) const override {
         /* Compute the node value of samples[start:end] and save it into dest.
 
         Parameters
@@ -366,8 +367,7 @@ public:
             The memory address which we will save the node value into.
         */
 
-        assert(dest.size() == label_count_total.size());
-        std::copy(BEGINEND(label_count_total), dest.begin());
+        dest->assign(BEGINEND(label_count_total));
     }
 };
 
@@ -610,9 +610,9 @@ protected:
 
     virtual void init(
         sx::strided_array_view<const DOUBLE_t, 2> y,
-        sx::array_view<const DOUBLE_t> sample_weight,
+        sx::strided_array_view<const DOUBLE_t> sample_weight,
         double weighted_n_samples,
-        sx::array_view<const SIZE_t> samples, SIZE_t start,
+        sx::strided_array_view<const SIZE_t> samples, SIZE_t start,
         SIZE_t end) override {
         /* Initialize the criterion at node samples[start:end] and
            children samples[start:start] and samples[start:end].*/
@@ -721,11 +721,11 @@ protected:
         }
     }
 
-    virtual void node_value(sx::array_view<double> dest) const override {
+    virtual void node_value(std::vector<double>* dest) const override {
         /* Compute the node value of samples[start:end] into dest.*/
-        assert(dest.size() == n_outputs);
+        dest->resize(n_outputs);
         for(auto k: range(n_outputs))
-            dest[k] = accu(k).mean_total;
+            (*dest)[k] = accu(k).mean_total;
     }
 };
 
@@ -831,7 +831,7 @@ Splitter(Criterion* criterion, SIZE_t max_features,
 void Splitter::
 init(sx::strided_array_view<const DTYPE_t, 2> X,
           sx::strided_array_view<const DOUBLE_t, 2> y,
-          sx::array_view<const DOUBLE_t> sample_weight) {
+          sx::strided_array_view<const DOUBLE_t> sample_weight) {
 
     // Create a new array which will be used to store nonzero
     // samples from the feature of interest
@@ -882,7 +882,7 @@ node_reset(SIZE_t start, SIZE_t end,
 }
 
 void Splitter::
-node_value(sx::array_view<double> dest) const {
+node_value(std::vector<double>* dest) const {
     criterion->node_value(dest);
 }
 
@@ -906,7 +906,7 @@ public:
 
     virtual void init(sx::strided_array_view<const DTYPE_t, 2> X,
               sx::strided_array_view<const DOUBLE_t, 2> y,
-              sx::array_view<const DOUBLE_t> sample_weight) override {
+              sx::strided_array_view<const DOUBLE_t> sample_weight) override {
         /* Initialize the splitter.*/
 
         // Call parent init
@@ -1259,108 +1259,70 @@ class RandomSplitter
     }
 };
 
-#if 0
-cdef class PresortBestSplitter(BaseDenseSplitter):
+
+class PresortBestSplitter
+: public BaseDenseSplitter {
     /* Splitter for finding the best split, using presorting.*/
-    cdef DTYPE_t* X_old
-    cdef np.ndarray X_argsorted
-    cdef INT32_t* X_argsorted_ptr
-    cdef SIZE_t X_argsorted_stride
+    sx::strided_array_view<const DTYPE_t, 2> X_old;
+    sx::matrix<int32_t> X_argsorted;
 
-    cdef SIZE_t n_total_samples
-    cdef unsigned char* sample_mask
+    SIZE_t n_total_samples;
+    std::vector<bool> sample_mask;
 
-    def __cinit__(self, Criterion criterion, SIZE_t max_features,
+    PresortBestSplitter(Criterion* criterion, SIZE_t max_features,
                   SIZE_t min_samples_leaf,
                   double min_weight_leaf,
-                  object random_state):
-        // Initialize pointers
-        self.X_old = NULL
-        self.X_argsorted_ptr = NULL
-        self.X_argsorted_stride = 0
-        self.sample_mask = NULL
+                  std::default_random_engine* random_state)
+    : BaseDenseSplitter(criterion, max_features, min_samples_leaf,
+        min_weight_leaf, random_state) {
+    }
 
-    def __dealloc__(self):
-        /* Destructor.*/
-        free(self.sample_mask)
-
-    def __reduce__(self):
-        return (PresortBestSplitter, (self.criterion,
-                                      self.max_features,
-                                      self.min_samples_leaf,
-                                      self.min_weight_leaf,
-                                      self.random_state), self.__getstate__())
-
-    cdef void init(self, object X,
-                   np.ndarray[DOUBLE_t, ndim=2, mode="c"] y,
-                   DOUBLE_t* sample_weight) except *:
-
-        cdef void* sample_mask = NULL
+    virtual void init(sx::strided_array_view<const DTYPE_t, 2> X,
+              sx::strided_array_view<const DOUBLE_t, 2> y,
+              sx::strided_array_view<const DOUBLE_t> sample_weight) override {
 
         // Call parent initializer
-        BaseDenseSplitter.init(self, X, y, sample_weight)
-
-        cdef np.ndarray X_ndarray = X
-
+        BaseDenseSplitter::init(X, y, sample_weight);
         // Pre-sort X
-        if self.X_old != self.X:
-            self.X_old = self.X
-            self.X_argsorted = np.asfortranarray(np.argsort(X_ndarray, axis=0),
-                                                 dtype=np.int32)
-            self.X_argsorted_ptr = <INT32_t*> self.X_argsorted.data
-            self.X_argsorted_stride = (<SIZE_t> self.X_argsorted.strides[1] /
-                                       <SIZE_t> self.X_argsorted.itemsize)
+        if(sx::is_same_view(X_old, X)) {
+            X_old.assign_view(X);
+            X_argsorted = sortperm<int32_t>(X, 0);
+            /*
+            for(auto c: range(ncols(X_argsorted))) {
+                auto c = sxv::column(X_argsorted, c);
+                std::iota(BEGINEND(c), 0);
+                auto b = sx::make_random_access_iterator_pair(sxv::column(X, c), c.begin());
+                std::sort(b, b + nrows(X), less_by_first());
+            )
+            */
+            n_total_samples = X.bounds()[0];
+            sample_mask.assign(n_total_samples, false);
+        }
+    }
 
-            self.n_total_samples = X.shape[0]
-            sample_mask = safe_realloc(&self.sample_mask, self.n_total_samples)
-            memset(sample_mask, 0, self.n_total_samples)
-
-    cdef void node_split(self, double impurity, SplitRecord* split,
-                         SIZE_t* n_constant_features) nogil:
+    virtual void node_split(double impurity, SplitRecord* split,
+                         SIZE_t* n_constant_features) override {
         /* Find the best split on node samples[start:end].*/
         // Find the best split
-        cdef SIZE_t* samples = self.samples
-        cdef SIZE_t start = self.start
-        cdef SIZE_t end = self.end
+        auto& Xf = feature_values;
 
-        cdef SIZE_t* features = self.features
-        cdef SIZE_t* constant_features = self.constant_features
-        cdef SIZE_t n_features = self.n_features
+        SplitRecord best, current;
 
-        cdef DTYPE_t* X = self.X
-        cdef DTYPE_t* Xf = self.feature_values
-        cdef SIZE_t X_sample_stride = self.X_sample_stride
-        cdef SIZE_t X_fx_stride = self.X_fx_stride
-        cdef INT32_t* X_argsorted = self.X_argsorted_ptr
-        cdef SIZE_t X_argsorted_stride = self.X_argsorted_stride
-        cdef SIZE_t n_total_samples = self.n_total_samples
-        cdef unsigned char* sample_mask = self.sample_mask
-
-        cdef SIZE_t max_features = self.max_features
-        cdef SIZE_t min_samples_leaf = self.min_samples_leaf
-        cdef double min_weight_leaf = self.min_weight_leaf
-        cdef UINT32_t* random_state = &self.rand_r_state
-
-        cdef SplitRecord best, current
-
-        cdef SIZE_t f_i = n_features
-        cdef SIZE_t f_j, p
+        SIZE_t f_i = n_features;
         // Number of features discovered to be constant during the split search
-        cdef SIZE_t n_found_constants = 0
+        SIZE_t n_found_constants = 0;
         // Number of features known to be constant and drawn without replacement
-        cdef SIZE_t n_drawn_constants = 0
-        cdef SIZE_t n_known_constants = n_constant_features[0]
+        SIZE_t n_drawn_constants = 0;
+        SIZE_t n_known_constants = *n_constant_features;
         // n_total_constants = n_known_constants + n_found_constants
-        cdef SIZE_t n_total_constants = n_known_constants
-        cdef SIZE_t n_visited_features = 0
-        cdef SIZE_t partition_end
-        cdef SIZE_t i, j
+        SIZE_t n_total_constants = n_known_constants;
+        SIZE_t n_visited_features = 0;
 
-        _init_split(&best, end)
+        _init_split(&best, end);
 
         // Set sample mask
-        for p in range(start, end):
-            sample_mask[samples[p]] = 1
+        for(auto p: range(start, end))
+            sample_mask[samples[p]] = true;
 
         // Sample up to max_features without replacement using a
         // Fisher-Yates-based algorithm (using the local variables `f_i` and
@@ -1371,12 +1333,12 @@ cdef class PresortBestSplitter(BaseDenseSplitter):
         // for good splitting) by ancestor nodes and save the information on
         // newly discovered constant features to spare computation on descendant
         // nodes.
-        while (f_i > n_total_constants and  // Stop early if remaining features
+        while(f_i > n_total_constants &&  // Stop early if remaining features
                                             // are constant
                 (n_visited_features < max_features or
                  // At least one drawn features must be non constant
-                 n_visited_features <= n_found_constants + n_drawn_constants)):
-            n_visited_features += 1
+                 n_visited_features <= n_found_constants + n_drawn_constants)) {
+            ++n_visited_features;
 
             // Loop invariant: elements of features in
             // - [:n_drawn_constant[ holds drawn and known constant features;
@@ -1390,123 +1352,130 @@ cdef class PresortBestSplitter(BaseDenseSplitter):
             //   and aren't constant.
 
             // Draw a feature at random
-            f_j = rand_int(n_drawn_constants, f_i - n_found_constants,
-                           random_state)
+            SIZE_t f_j = rand_int(n_drawn_constants, f_i - n_found_constants,
+                           *random_state);
 
-            if f_j < n_known_constants:
+            if(f_j < n_known_constants) {
                 // f_j is in [n_drawn_constants, n_known_constants[
-                tmp = features[f_j]
-                features[f_j] = features[n_drawn_constants]
-                features[n_drawn_constants] = tmp
-
-                n_drawn_constants += 1
-
-            else:
+                std::swap(features[f_j], features[n_drawn_constants]);
+                ++n_drawn_constants;
+            } else {
                 // f_j in the interval [n_known_constants, f_i - n_found_constants[
-                f_j += n_found_constants
+                f_j += n_found_constants;
                 // f_j in the interval [n_total_constants, f_i[
 
-                current.feature = features[f_j]
+                current.feature = features[f_j];
 
                 // Extract ordering from X_argsorted
-                p = start
+                SIZE_t p = start;
 
-                for i in range(n_total_samples):
-                    j = X_argsorted[X_argsorted_stride * current.feature + i]
-                    if sample_mask[j] == 1:
-                        samples[p] = j
-                        Xf[p] = X[X_sample_stride * j +
-                                  X_fx_stride * current.feature]
-                        p += 1
+                sx::strided_array_view<int, 2> a;
+                a[{2, 3}];
+                for(auto i: range(n_total_samples)) {
+                    SIZE_t j = X_argsorted[{i, current.feature}];
+                    if(sample_mask[j]) {
+                        samples[p] = j;
+                        Xf[p] = X[{j, current.feature}];
+                        ++p;
+                    }
+                }
 
                 // Evaluate all splits
-                if Xf[end - 1] <= Xf[start] + FEATURE_THRESHOLD:
-                    features[f_j] = features[n_total_constants]
-                    features[n_total_constants] = current.feature
+                if(Xf[end - 1] <= Xf[start] + FEATURE_THRESHOLD) {
+                    features[f_j] = features[n_total_constants];
+                    features[n_total_constants] = current.feature;
 
-                    n_found_constants += 1
-                    n_total_constants += 1
+                    ++n_found_constants;
+                    ++n_total_constants;
+                } else {
+                    --f_i;
+                    std::swap(features[f_i], features[f_j]);
 
-                else:
-                    f_i -= 1
-                    features[f_i], features[f_j] = features[f_j], features[f_i]
+                    criterion->reset();
+                    SIZE_t p = start;
 
-                    self.criterion.reset()
-                    p = start
-
-                    while p < end:
-                        while (p + 1 < end and
-                               Xf[p + 1] <= Xf[p] + FEATURE_THRESHOLD):
-                            p += 1
+                    while(p < end) {
+                        while(p + 1 < end &&
+                               Xf[p + 1] <= Xf[p] + FEATURE_THRESHOLD) {
+                            ++p;
+                        }
 
                         // (p + 1 >= end) or (X[samples[p + 1], current.feature] >
                         //                    X[samples[p], current.feature])
-                        p += 1
+                        ++p;
                         // (p >= end) or (X[samples[p], current.feature] >
                         //                X[samples[p - 1], current.feature])
 
-                        if p < end:
-                            current.pos = p
+                        if(p < end) {
+                            current.pos = p;
 
                             // Reject if min_samples_leaf is not guaranteed
-                            if (((current.pos - start) < min_samples_leaf) or
-                                    ((end - current.pos) < min_samples_leaf)):
-                                continue
+                            if ((((current.pos - start) < min_samples_leaf) ||
+                                    ((end - current.pos) < min_samples_leaf))) {
+                                continue;
+                            }
 
-                            self.criterion.update(current.pos)
+                            criterion->update(current.pos);
 
                             // Reject if min_weight_leaf is not satisfied
-                            if ((self.criterion.weighted_n_left < min_weight_leaf) or
-                                    (self.criterion.weighted_n_right < min_weight_leaf)):
-                                continue
+                            if (((criterion->get_weighted_n_left() < min_weight_leaf) ||
+                                    (criterion->get_weighted_n_right() < min_weight_leaf))) {
+                                continue;
+                            }
 
-                            current.improvement = self.criterion.impurity_improvement(impurity)
+                            current.improvement = criterion->impurity_improvement(impurity);
 
-                            if current.improvement > best.improvement:
-                                self.criterion.children_impurity(&current.impurity_left,
-                                                                 &current.impurity_right)
+                            if(current.improvement > best.improvement) {
+                                criterion->children_impurity(&current.impurity_left,
+                                                                 &current.impurity_right);
 
-                                current.threshold = (Xf[p - 1] + Xf[p]) / 2.0
-                                if current.threshold == Xf[p]:
-                                    current.threshold = Xf[p - 1]
+                                current.threshold = (Xf[p - 1] + Xf[p]) / 2.0;
+                                if(current.threshold == Xf[p])
+                                    current.threshold = Xf[p - 1];
 
-                                best = current  // copy
+                                best = current;  // copy
+                            }
+                        } // if(p < end)
+                    } // while(p < end)
+                } // else of if(Xf[end - 1] <= Xf[start] + FEATURE_THRESHOLD)
+            } // else of if(f_j < n_known_constants)
+        } // big while
 
         // Reorganize into samples[start:best.pos] + samples[best.pos:end]
-        if best.pos < end:
-            partition_end = end
-            p = start
+        if(best.pos < end) {
+            SIZE_t partition_end = end;
+            SIZE_t p = start;
 
-            while p < partition_end:
-                if X[X_sample_stride * samples[p] +
-                     X_fx_stride * best.feature] <= best.threshold:
-                    p += 1
-
-                else:
-                    partition_end -= 1
-
-                    tmp = samples[partition_end]
-                    samples[partition_end] = samples[p]
-                    samples[p] = tmp
+            while(p < partition_end) {
+                if(X[{samples[p], best.feature}] <= best.threshold) {
+                    ++p;
+                } else {
+                    --partition_end;
+                    std::swap(samples[partition_end], samples[p]);
+                }
+            }
+        }
 
         // Reset sample mask
-        for p in range(start, end):
-            sample_mask[samples[p]] = 0
+        for(auto p: range(start, end))
+            sample_mask[samples[p]] = false;
 
         // Respect invariant for constant features: the original order of
         // element in features[:n_known_constants] must be preserved for sibling
         // and child nodes
-        memcpy(features, constant_features, sizeof(SIZE_t) * n_known_constants)
+        std::copy_n(constant_features.begin(), n_known_constants, features.begin());
 
         // Copy newly found constant features
-        memcpy(constant_features + n_known_constants,
-               features + n_known_constants,
-               sizeof(SIZE_t) * n_found_constants)
+        std::copy_n(features.begin() + n_known_constants, n_found_constants,
+            constant_features.begin() + n_known_constants);
 
         // Return values
-        split[0] = best
-        n_constant_features[0] = n_total_constants
+        *split = best;
+        *n_constant_features = n_total_constants;
+    }
+};
 
+#if 0
 cdef class BaseSparseSplitter(Splitter):
     // The sparse splitter works only with csc sparse matrix format
     cdef DTYPE_t* X_data

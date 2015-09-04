@@ -1,4 +1,6 @@
-find_package(sx REQUIRED)
+if(NOT TARGET sx)
+    find_package(sx REQUIRED)
+endif()
 
 file(GLOB_RECURSE files *.cpp *.h)
 
