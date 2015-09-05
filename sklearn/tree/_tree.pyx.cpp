@@ -8,6 +8,7 @@
 #include "sx/range.h"
 #include "sx/random_access_iterator_pair.h"
 #include "sx/multi_array.h"
+#include "sx/sort.h"
 
 namespace sklcpp {
 
@@ -836,7 +837,7 @@ init(sx::strided_array_view<const DTYPE_t, 2> X,
     // Create a new array which will be used to store nonzero
     // samples from the feature of interest
     samples.clear();
-    samples.reserve(X.bounds()[0]);
+    samples.reserve(X.extents()[0]);
 
     weighted_n_samples = 0.0;
 
@@ -852,7 +853,7 @@ init(sx::strided_array_view<const DTYPE_t, 2> X,
     }
     n_samples = samples.size();
 
-    n_features = X.bounds()[1];
+    n_features = X.extents()[1];
     features.resize(n_features);
 
     std::iota(BEGINEND(features), 0);
@@ -1286,7 +1287,7 @@ class PresortBestSplitter
         // Pre-sort X
         if(sx::is_same_view(X_old, X)) {
             X_old.assign_view(X);
-            X_argsorted = sortperm<int32_t>(X, 0);
+            X_argsorted = sx::sortperm<int32_t>(X, 0);
             /*
             for(auto c: range(ncols(X_argsorted))) {
                 auto c = sxv::column(X_argsorted, c);
@@ -1295,7 +1296,7 @@ class PresortBestSplitter
                 std::sort(b, b + nrows(X), less_by_first());
             )
             */
-            n_total_samples = X.bounds()[0];
+            n_total_samples = X.extents()[0];
             sample_mask.assign(n_total_samples, false);
         }
     }
