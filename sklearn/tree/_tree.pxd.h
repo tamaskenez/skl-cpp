@@ -5,6 +5,8 @@
 #include <random>
 
 #include "sx/array_view.h"
+#include "nclasses.h"
+#include "sx/multi_array.h"
 
 namespace sklcpp {
 // Authors: Gilles Louppe <g.louppe@gmail.com>
@@ -26,6 +28,8 @@ typedef intptr_t SIZE_t;        // Type for indices and counters
 typedef int32_t  INT32_t;       // Signed 32 bit integer
 typedef uint32_t UINT32_t;      // Unsigned 32 bit integer
 
+typedef float DTYPE;
+typedef double DOUBLE;
 
 // =============================================================================
 // Criterion
@@ -316,68 +320,132 @@ public:
     double node_impurity() const;
 };
 
-#if 0
 
 // =============================================================================
 // Tree
 // =============================================================================
 
-cdef struct Node:
+struct Node {
     // Base storage structure for the nodes in a Tree object
 
-    SIZE_t left_child                    // id of the left child of the node
-    SIZE_t right_child                   // id of the right child of the node
-    SIZE_t feature                       // Feature used for splitting the node
-    DOUBLE_t threshold                   // Threshold value at the node
-    DOUBLE_t impurity                    // Impurity of the node (i.e., the value of the criterion)
-    SIZE_t n_node_samples                // Number of samples at the node
-    DOUBLE_t weighted_n_node_samples     // Weighted number of samples at the node
+    SIZE_t left_child;                   // id of the left child of the node
+    SIZE_t right_child;                  // id of the right child of the node
+    SIZE_t feature;                      // Feature used for splitting the node
+    DOUBLE_t threshold;                  // Threshold value at the node
+    DOUBLE_t impurity;                   // Impurity of the node (i.e., the value of the criterion)
+    SIZE_t n_node_samples;               // Number of samples at the node
+    DOUBLE_t weighted_n_node_samples;    // Weighted number of samples at the node
+};
 
+class Tree {
+	/* Array-based representation of a binary decision tree.
 
-cdef class Tree:
+    The binary tree is represented as a number of parallel arrays. The i-th
+    element of each array holds information about the node `i`. Node 0 is the
+    tree's root. You can find a detailed description of all arrays in
+    `_tree.pxd`. NOTE: Some of the arrays only apply to either leaves or split
+    nodes, resp. In this case the values of nodes of the other type are
+    arbitrary!
+
+    Attributes
+    ----------
+    node_count : int
+        The number of nodes (internal nodes + leaves) in the tree.
+
+    capacity : int
+        The current capacity (i.e., size) of the arrays, which is at least as
+        great as `node_count`.
+
+    max_depth : int
+        The maximal depth of the tree.
+
+    children_left : array of int, shape [node_count]
+        children_left[i] holds the node id of the left child of node i.
+        For leaves, children_left[i] == TREE_LEAF. Otherwise,
+        children_left[i] > i. This child handles the case where
+        X[:, feature[i]] <= threshold[i].
+
+    children_right : array of int, shape [node_count]
+        children_right[i] holds the node id of the right child of node i.
+        For leaves, children_right[i] == TREE_LEAF. Otherwise,
+        children_right[i] > i. This child handles the case where
+        X[:, feature[i]] > threshold[i].
+
+    feature : array of int, shape [node_count]
+        feature[i] holds the feature to split on, for the internal node i.
+
+    threshold : array of double, shape [node_count]
+        threshold[i] holds the threshold for the internal node i.
+
+    value : array of double, shape [node_count, n_outputs, max_n_classes]
+        Contains the constant prediction value of each node.
+
+    impurity : array of double, shape [node_count]
+        impurity[i] holds the impurity (i.e., the value of the splitting
+        criterion) at node i.
+
+    n_node_samples : array of int, shape [node_count]
+        n_node_samples[i] holds the number of training samples reaching node i.
+
+    weighted_n_node_samples : array of int, shape [node_count]
+        weighted_n_node_samples[i] holds the weighted number of training samples
+        reaching node i.
+    */
+
     // The Tree object is a binary tree structure constructed by the
     // TreeBuilder. The tree structure is used for predictions and
     // feature importances.
 
     // Input/Output layout
-    cdef public SIZE_t n_features        // Number of features in X
-    cdef SIZE_t* n_classes               // Number of classes in y[:, k]
-    cdef public SIZE_t n_outputs         // Number of outputs in y
-    cdef public SIZE_t max_n_classes     // max(n_classes)
+    SIZE_t n_features;           // Number of features in X
+    NClassesRef n_classes;       // Number of classes in y[:, k]
 
     // Inner structures: values are stored separately from node structure,
     // since size is determined at runtime.
-    cdef public SIZE_t max_depth         // Max depth of the tree
-    cdef public SIZE_t node_count        // Counter for node IDs
-    cdef public SIZE_t capacity          // Capacity of tree, in terms of nodes
-    cdef Node* nodes                     // Array of nodes
-    cdef double* value                   // (capacity, n_outputs, max_n_classes) array of values
-    cdef SIZE_t value_stride             // = n_outputs * max_n_classes
+    SIZE_t max_depth;            // Max depth of the tree
+    std::vector<Node> nodes;     // Array of nodes
+	sx::matrix<double> value;    // [{node, c}] where c is to be calculated from NClassesRef
 
     // Methods
-    cdef SIZE_t _add_node(self, SIZE_t parent, bint is_left, bint is_leaf,
+	Tree(int n_features, NClassesRef n_classes);
+
+    SIZE_t _add_node(SIZE_t parent, bool is_left, bool is_leaf,
                           SIZE_t feature, double threshold, double impurity,
                           SIZE_t n_node_samples,
-                          double weighted_n_samples) nogil
-    cdef void _resize(self, SIZE_t capacity) except *
-    cdef int _resize_c(self, SIZE_t capacity=*) nogil
+                          double weighted_n_samples);
+	/* Add a node to the tree.
 
-    cdef np.ndarray _get_value_ndarray(self)
-    cdef np.ndarray _get_node_ndarray(self)
+	The new node registers itself as the child of its parent.
 
-    cpdef np.ndarray predict(self, object X)
-    cpdef np.ndarray apply(self, object X)
-    cdef np.ndarray _apply_dense(self, object X)
-    cdef np.ndarray _apply_sparse_csr(self, object X)
+	Returns (size_t)(-1) on error.
+	*/
 
-    cpdef compute_feature_importances(self, normalize=*)
+    //np.ndarray _get_node_ndarray()
 
+    sx::matrix<double> predict(sx::array_view<DTYPE_t, 2> X) const;
+	/* Predict target for X.*/
+
+    std::vector<SIZE_t> apply(sx::array_view<DTYPE_t, 2> X) const;
+	/* Finds the terminal region (=leaf node) for each sample in X.*/
+
+	std::vector<SIZE_t> _apply_dense(sx::array_view<DTYPE_t, 2> X) const;
+	/* Finds the terminal region (=leaf node) for each sample in X.*/
+
+	SIZE_t apply_single(sx::array_view<DTYPE_t> x) const;
+	SIZE_t _apply_dense_single(sx::array_view<DTYPE_t> x) const;
+
+    //np.ndarray _apply_sparse_csr(object X)
+
+    //compute_feature_importances(normalize)
+};
 
 // =============================================================================
 // Tree builder
 // =============================================================================
 
-cdef class TreeBuilder:
+class TreeBuilder {
+	/* Interface for different tree building strategies.*/
+
     // The TreeBuilder recursively builds a Tree object from training samples,
     // using a Splitter object for splitting internal nodes and assigning
     // values to leaves.
@@ -385,17 +453,20 @@ cdef class TreeBuilder:
     // This class controls the various stopping criteria and the node splitting
     // evaluation order, e.g. depth-first or best-first.
 
-    cdef Splitter splitter          // Splitting algorithm
+    Splitter* splitter;          // Splitting algorithm
 
-    cdef SIZE_t min_samples_split   // Minimum number of samples in an internal node
-    cdef SIZE_t min_samples_leaf    // Minimum number of samples in a leaf
-    cdef double min_weight_leaf     // Minimum weight in a leaf
-    cdef SIZE_t max_depth           // Maximal tree depth
+    SIZE_t min_samples_split;   // Minimum number of samples in an internal node
+    SIZE_t min_samples_leaf;    // Minimum number of samples in a leaf
+    double min_weight_leaf;     // Minimum weight in a leaf
+    SIZE_t max_depth;           // Maximal tree depth
 
-    cpdef build(self, Tree tree, object X, np.ndarray y,
-                np.ndarray sample_weight=*)
-    cdef _check_input(self, object X, np.ndarray y, np.ndarray sample_weight)
+    virtual void build(Tree& tree, sx::matrix<DTYPE_t> X, sx::matrix<DOUBLE> y,
+                             sx::matrix<DOUBLE> sample_weight) = 0;
+	/* Build a decision tree from the training set (X, y).*/
 
-#endif // if 0
+    void _check_input(sx::matrix<DTYPE_t> X, sx::matrix<DOUBLE> y,
+                             sx::matrix<DOUBLE> sample_weight);
+};
+
 }
 #endif //incl guard

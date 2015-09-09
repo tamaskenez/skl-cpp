@@ -59,14 +59,13 @@ cdef extern from "numpy/arrayobject.h":
 // Types and constants
 // =============================================================================
 
-from numpy import float32 as DTYPE
-from numpy import float64 as DOUBLE
-
 cdef double INFINITY = np.inf
 TREE_LEAF = -1
 TREE_UNDEFINED = -2
-cdef SIZE_t _TREE_LEAF = TREE_LEAF
-cdef SIZE_t _TREE_UNDEFINED = TREE_UNDEFINED
+*/
+    const SIZE_t _TREE_LEAF = -1;
+    const SIZE_t _TREE_UNDEFINED = -2;
+    /*
 cdef SIZE_t INITIAL_STACK_SIZE = 10
 
 cdef DTYPE_t MIN_IMPURITY_SPLIT = 1e-7
@@ -159,55 +158,6 @@ impurity_improvement(double impurity) const {
         (impurity - weighted_n_right / weighted_n_node_samples * impurity_right
             - weighted_n_left / weighted_n_node_samples * impurity_left));
 }
-
-
-// Contains the original n_classes array which describes the number of
-// classes for each output.
-// Additionally it contains offsets = cumsum(n_classes) to help to store
-// output values in a contiguous storage
-// It also contains an optimization where all n_classes values are 1
-class NClassesRef {
-protected:
-  struct Item {
-    SIZE_t n_classes;
-    SIZE_t offset;
-  };
-  SIZE_t n_outputs_;
-  const Item* n_classes_ptr;
-public:
-  NClassesRef()
-  : n_outputs_(0)
-  , n_classes_ptr(nullptr)
-  {}
-
-  SIZE_t n_outputs() const { return n_outputs_; }
-  inline SIZE_t count(SIZE_t i) const { return n_classes_ptr ? n_classes_ptr[i].n_classes : 1; }
-  inline SIZE_t offset(SIZE_t i) const { return n_classes_ptr ? n_classes_ptr[i].offset : i; }
-  int n_elements() const { return n_classes_ptr ? n_classes_ptr[n_outputs()].offset : n_outputs(); }
-  inline SIZE_t idx(SIZE_t output_idx, SIZE_t class_idx) const {
-    assert(0 <= output_idx && output_idx < n_outputs());
-    assert(0 <= class_idx && class_idx < count(output_idx));
-    return offset(output_idx) + class_idx;
-  }
-};
-
-class NClasses
-: public NClassesRef
-{
-  std::vector<Item> v;
-public:
-  NClasses()
-  : v(1, Item{0, 0})
-  {}
-
-  void push_back(SIZE_t n_classes) {
-    v.insert(
-      v.end() - 1,
-      Item{n_classes, v.empty() ? 0 : v.back().offset + v.back().n_classes});
-      if(n_classes_ptr || n_classes != 1)
-        n_classes_ptr = v.data();
-  }
-};
 
 class ClassificationCriterion
     : public Criterion {
@@ -2227,48 +2177,30 @@ cdef class RandomSparseSplitter(BaseSparseSplitter):
         // Return values
         split[0] = best
         n_constant_features[0] = n_total_constants
-
+#endif
 
 // =============================================================================
 // Tree builders
 // =============================================================================
-cdef class TreeBuilder:
-    /* Interface for different tree building strategies.*/
 
-    cpdef build(self, Tree tree, object X, np.ndarray y,
-                np.ndarray sample_weight=None):
-        /* Build a decision tree from the training set (X, y).*/
-        pass
+    void TreeBuilder::_check_input(sx::matrix<DTYPE_t> X, sx::matrix<DOUBLE> y,
+                             sx::matrix<DOUBLE> sample_weight) {
+        assert(X.extents(0) == y.extents(0));
+        if(!sample_weight.empty())
+            assert(X.extents(0) == sample_weight.extents(0));
+        // todo:
+        // the original code did this:
+        // if issparse(X): for this check the original code
+        // else if X's type is not DTYPE (= float32)
+        //     copy X to a fortran-order DTYPE X
+        // if y's type is not DOUBLE (float64) or not contiguous (C-order)
+        //     copy y to a contiguous DOUBLE C-order array
+        // if sample_weight is no null and not DOUBLE or not contiguous
+        //     copy sample_weight to a DOUBLE C-order array
+    }
+}
 
-    cdef inline _check_input(self, object X, np.ndarray y,
-                             np.ndarray sample_weight):
-        /* Check input dtype, layout and format*/
-        if issparse(X):
-            X = X.tocsc()
-            X.sort_indices()
-
-            if X.data.dtype != DTYPE:
-                X.data = np.ascontiguousarray(X.data, dtype=DTYPE)
-
-            if X.indices.dtype != np.int32 or X.indptr.dtype != np.int32:
-                raise ValueError("No support for np.int64 index based "
-                                 "sparse matrices")
-
-        elif X.dtype != DTYPE:
-            // since we have to copy we will make it fortran for efficiency
-            X = np.asfortranarray(X, dtype=DTYPE)
-
-        if y.dtype != DOUBLE or not y.flags.contiguous:
-            y = np.ascontiguousarray(y, dtype=DOUBLE)
-
-        if (sample_weight is not None and
-            (sample_weight.dtype != DOUBLE or
-            not sample_weight.flags.contiguous)):
-                sample_weight = np.asarray(sample_weight, dtype=DOUBLE,
-                                           order="C")
-
-        return X, y, sample_weight
-
+#if 0
 // Depth first builder ---------------------------------------------------------
 
 cdef class DepthFirstTreeBuilder(TreeBuilder):
@@ -2620,320 +2552,98 @@ cdef class BestFirstTreeBuilder(TreeBuilder):
         return 0
 
 
+#endif
 // =============================================================================
 // Tree
 // =============================================================================
 
-cdef class Tree:
-    /* Array-based representation of a binary decision tree.
+    namespace sklcpp {
+    Tree::Tree(int n_features, NClassesRef n_classes)
+    : n_features(n_features)
+    , n_classes(n_classes)
+    , max_depth(0) {
+    }
 
-    The binary tree is represented as a number of parallel arrays. The i-th
-    element of each array holds information about the node `i`. Node 0 is the
-    tree's root. You can find a detailed description of all arrays in
-    `_tree.pxd`. NOTE: Some of the arrays only apply to either leaves or split
-    nodes, resp. In this case the values of nodes of the other type are
-    arbitrary!
-
-    Attributes
-    ----------
-    node_count : int
-        The number of nodes (internal nodes + leaves) in the tree.
-
-    capacity : int
-        The current capacity (i.e., size) of the arrays, which is at least as
-        great as `node_count`.
-
-    max_depth : int
-        The maximal depth of the tree.
-
-    children_left : array of int, shape [node_count]
-        children_left[i] holds the node id of the left child of node i.
-        For leaves, children_left[i] == TREE_LEAF. Otherwise,
-        children_left[i] > i. This child handles the case where
-        X[:, feature[i]] <= threshold[i].
-
-    children_right : array of int, shape [node_count]
-        children_right[i] holds the node id of the right child of node i.
-        For leaves, children_right[i] == TREE_LEAF. Otherwise,
-        children_right[i] > i. This child handles the case where
-        X[:, feature[i]] > threshold[i].
-
-    feature : array of int, shape [node_count]
-        feature[i] holds the feature to split on, for the internal node i.
-
-    threshold : array of double, shape [node_count]
-        threshold[i] holds the threshold for the internal node i.
-
-    value : array of double, shape [node_count, n_outputs, max_n_classes]
-        Contains the constant prediction value of each node.
-
-    impurity : array of double, shape [node_count]
-        impurity[i] holds the impurity (i.e., the value of the splitting
-        criterion) at node i.
-
-    n_node_samples : array of int, shape [node_count]
-        n_node_samples[i] holds the number of training samples reaching node i.
-
-    weighted_n_node_samples : array of int, shape [node_count]
-        weighted_n_node_samples[i] holds the weighted number of training samples
-        reaching node i.
-    */
-    // Wrap for outside world.
-    // WARNING: these reference the current `nodes` and `value` buffers, which
-    // must not be be freed by a subsequent memory allocation.
-    // (i.e. through `_resize` or `__setstate__`)
-    property n_classes:
-        def __get__(self):
-            // it's small; copy for memory safety
-            return sizet_ptr_to_ndarray(self.n_classes, self.n_outputs).copy()
-
-    property children_left:
-        def __get__(self):
-            return self._get_node_ndarray()['left_child'][:self.node_count]
-
-    property children_right:
-        def __get__(self):
-            return self._get_node_ndarray()['right_child'][:self.node_count]
-
-    property feature:
-        def __get__(self):
-            return self._get_node_ndarray()['feature'][:self.node_count]
-
-    property threshold:
-        def __get__(self):
-            return self._get_node_ndarray()['threshold'][:self.node_count]
-
-    property impurity:
-        def __get__(self):
-            return self._get_node_ndarray()['impurity'][:self.node_count]
-
-    property n_node_samples:
-        def __get__(self):
-            return self._get_node_ndarray()['n_node_samples'][:self.node_count]
-
-    property weighted_n_node_samples:
-        def __get__(self):
-            return self._get_node_ndarray()['weighted_n_node_samples'][:self.node_count]
-
-    property value:
-        def __get__(self):
-            return self._get_value_ndarray()[:self.node_count]
-
-    def __cinit__(self, int n_features, np.ndarray[SIZE_t, ndim=1] n_classes,
-                  int n_outputs):
-        /* Constructor.*/
-        // Input/Output layout
-        self.n_features = n_features
-        self.n_outputs = n_outputs
-        self.n_classes = NULL
-        safe_realloc(&self.n_classes, n_outputs)
-
-        self.max_n_classes = np.max(n_classes)
-        self.value_stride = n_outputs * self.max_n_classes
-
-        cdef SIZE_t k
-        for k in range(n_outputs):
-            self.n_classes[k] = n_classes[k]
-
-        // Inner structures
-        self.max_depth = 0
-        self.node_count = 0
-        self.capacity = 0
-        self.value = NULL
-        self.nodes = NULL
-
-    def __dealloc__(self):
-        /* Destructor.*/
-        // Free all inner structures
-        free(self.n_classes)
-        free(self.value)
-        free(self.nodes)
-
-    def __reduce__(self):
-        /* Reduce re-implementation, for pickling.*/
-        return (Tree, (self.n_features,
-                       sizet_ptr_to_ndarray(self.n_classes, self.n_outputs),
-                       self.n_outputs), self.__getstate__())
-
-    def __getstate__(self):
-        /* Getstate re-implementation, for pickling.*/
-        d = {}
-        d["node_count"] = self.node_count
-        d["nodes"] = self._get_node_ndarray()
-        d["values"] = self._get_value_ndarray()
-        return d
-
-    def __setstate__(self, d):
-        /* Setstate re-implementation, for unpickling.*/
-        self.node_count = d["node_count"]
-
-        if 'nodes' not in d:
-            raise ValueError('You have loaded Tree version which '
-                             'cannot be imported')
-
-        node_ndarray = d['nodes']
-        value_ndarray = d['values']
-
-        value_shape = (node_ndarray.shape[0], self.n_outputs,
-                       self.max_n_classes)
-        if (node_ndarray.ndim != 1 or
-                node_ndarray.dtype != NODE_DTYPE or
-                not node_ndarray.flags.c_contiguous or
-                value_ndarray.shape != value_shape or
-                not value_ndarray.flags.c_contiguous or
-                value_ndarray.dtype != np.float64):
-            raise ValueError('Did not recognise loaded array layout')
-
-        self.capacity = node_ndarray.shape[0]
-        if self._resize_c(self.capacity) != 0:
-            raise MemoryError("resizing tree to %d" % self.capacity)
-        nodes = memcpy(self.nodes, (<np.ndarray> node_ndarray).data,
-                       self.capacity * sizeof(Node))
-        value = memcpy(self.value, (<np.ndarray> value_ndarray).data,
-                       self.capacity * self.value_stride * sizeof(double))
-
-    cdef void _resize(self, SIZE_t capacity) except *:
-        /* Resize all inner arrays to `capacity`, if `capacity` == -1, then
-           double the size of the inner arrays.*/
-        if self._resize_c(capacity) != 0:
-            raise MemoryError()
-
-    // XXX using (size_t)(-1) is ugly, but SIZE_MAX is not available in C89
-    // (i.e., older MSVC).
-    cdef int _resize_c(self, SIZE_t capacity=<SIZE_t>(-1)) nogil:
-        /* Guts of _resize. Returns 0 for success, -1 for error.*/
-        if capacity == self.capacity and self.nodes != NULL:
-            return 0
-
-        if capacity == <SIZE_t>(-1):
-            if self.capacity == 0:
-                capacity = 3  // default initial value
-            else:
-                capacity = 2 * self.capacity
-
-        // XXX no safe_realloc here because we need to grab the GIL
-        cdef void* ptr = realloc(self.nodes, capacity * sizeof(Node))
-        if ptr == NULL:
-            return -1
-        self.nodes = <Node*> ptr
-        ptr = realloc(self.value,
-                      capacity * self.value_stride * sizeof(double))
-        if ptr == NULL:
-            return -1
-        self.value = <double*> ptr
-
-        // value memory is initialised to 0 to enable classifier argmax
-        if capacity > self.capacity:
-            memset(<void*>(self.value + self.capacity * self.value_stride), 0,
-                   (capacity - self.capacity) * self.value_stride *
-                   sizeof(double))
-
-        // if capacity smaller than node_count, adjust the counter
-        if capacity < self.node_count:
-            self.node_count = capacity
-
-        self.capacity = capacity
-        return 0
-
-    cdef SIZE_t _add_node(self, SIZE_t parent, bint is_left, bint is_leaf,
+    SIZE_t Tree::_add_node(SIZE_t parent, bool is_left, bool is_leaf,
                           SIZE_t feature, double threshold, double impurity,
-                          SIZE_t n_node_samples, double weighted_n_node_samples) nogil:
-        /* Add a node to the tree.
+                          SIZE_t n_node_samples, double weighted_n_node_samples) {
+        SIZE_t node_id = nodes.size();
 
-        The new node registers itself as the child of its parent.
+        nodes.emplace_back();
+        Node& node = nodes.back();
+        node.impurity = impurity;
+        node.n_node_samples = n_node_samples;
+        node.weighted_n_node_samples = weighted_n_node_samples;
 
-        Returns (size_t)(-1) on error.
-        */
-        cdef SIZE_t node_id = self.node_count
+        if(parent != _TREE_UNDEFINED) {
+            if(is_left)
+                nodes[parent].left_child = node_id;
+            else
+                nodes[parent].right_child = node_id;
+        }
 
-        if node_id >= self.capacity:
-            if self._resize_c() != 0:
-                return <SIZE_t>(-1)
-
-        cdef Node* node = &self.nodes[node_id]
-        node.impurity = impurity
-        node.n_node_samples = n_node_samples
-        node.weighted_n_node_samples = weighted_n_node_samples
-
-        if parent != _TREE_UNDEFINED:
-            if is_left:
-                self.nodes[parent].left_child = node_id
-            else:
-                self.nodes[parent].right_child = node_id
-
-        if is_leaf:
-            node.left_child = _TREE_LEAF
-            node.right_child = _TREE_LEAF
-            node.feature = _TREE_UNDEFINED
-            node.threshold = _TREE_UNDEFINED
-
-        else:
+        if(is_leaf) {
+            node.left_child = _TREE_LEAF;
+            node.right_child = _TREE_LEAF;
+            node.feature = _TREE_UNDEFINED;
+            node.threshold = _TREE_UNDEFINED;
+        } else {
             // left_child and right_child will be set later
-            node.feature = feature
-            node.threshold = threshold
+            node.feature = feature;
+            node.threshold = threshold;
+        }
 
-        self.node_count += 1
+        return node_id;
+    }
 
-        return node_id
+    sx::matrix<double> Tree::predict(sx::array_view<DTYPE_t, 2> X) const {
+        sx::matrix<double> out(sx::matrix<double>::extents_type{X.extents(0), value.extents(1)});
+        for(auto i: range(X.extents(0)))
+        {
+            auto node_id = apply_single(sx::subvector<DTYPE_t, 2>(X, {i, 0}, 1));
+            if(value.extents(1) == 1)
+                out(i, 0) = value(node_id, 0);
+            else
+                subvector(out.view(), {i, 0}, 1) <<= subvector(value.view(), {node_id, 0}, 1);
+        }
+        return out;
+    }
 
-    cpdef np.ndarray predict(self, object X):
-        /* Predict target for X.*/
-        out = self._get_value_ndarray().take(self.apply(X), axis=0,
-                                             mode='clip')
-        if self.n_outputs == 1:
-            out = out.reshape(X.shape[0], self.max_n_classes)
-        return out
+    SIZE_t Tree::_apply_dense_single(sx::array_view<DTYPE_t> x) const {
+        auto node = nodes.data();
+        // While node not a leaf
+        while(node->left_child != _TREE_LEAF) {
+            // ... and node.right_child != _TREE_LEAF:
+            if(x[node->feature] <= node->threshold)
+                node = &nodes[node.left_child];
+            else
+                node = &nodes[node.right_child];
+        }
+        return (SIZE_t)(node - nodes.data());  // node offset
+    }
 
-    cpdef np.ndarray apply(self, object X):
-        /* Finds the terminal region (=leaf node) for each sample in X.*/
+    std::vector<SIZE_t> Tree::apply(sx::array_view<DTYPE_t, 2> X) {
+#if 0
         if issparse(X):
             return self._apply_sparse_csr(X)
         else:
-            return self._apply_dense(X)
+#endif
+            return _apply_dense(X);
+    }
 
-
-    cdef inline np.ndarray _apply_dense(self, object X):
-        /* Finds the terminal region (=leaf node) for each sample in X.*/
-
-        // Check input
-        if not isinstance(X, np.ndarray):
-            raise ValueError("X should be in np.ndarray format, got %s"
-                             % type(X))
-
-        if X.dtype != DTYPE:
-            raise ValueError("X.dtype should be np.float32, got %s" % X.dtype)
-
+    std::vector<SIZE_t> Tree::_apply_dense(sx::array_view<DTYPE_t, 2> X) {
         // Extract input
-        cdef np.ndarray X_ndarray = X
-        cdef DTYPE_t* X_ptr = <DTYPE_t*> X_ndarray.data
-        cdef SIZE_t X_sample_stride = <SIZE_t> X.strides[0] / <SIZE_t> X.itemsize
-        cdef SIZE_t X_fx_stride = <SIZE_t> X.strides[1] / <SIZE_t> X.itemsize
-        cdef SIZE_t n_samples = X.shape[0]
+        SIZE_t n_samples = X.extents(0);
 
         // Initialize output
-        cdef np.ndarray[SIZE_t] out = np.zeros((n_samples,), dtype=np.intp)
-        cdef SIZE_t* out_ptr = <SIZE_t*> out.data
+        std::vector<SIZE_t> out(n_samples);
 
-        // Initialize auxiliary data-structure
-        cdef Node* node = NULL
-        cdef SIZE_t i = 0
+        for(auto i: range(n_samples))
+            out_ptr[i] = _apply_dense(subvector(X, {i, 0}, 1));
+        return out;
+    }
 
-        with nogil:
-            for i in range(n_samples):
-                node = self.nodes
-                // While node not a leaf
-                while node.left_child != _TREE_LEAF:
-                    // ... and node.right_child != _TREE_LEAF:
-                    if X_ptr[X_sample_stride * i +
-                             X_fx_stride * node.feature] <= node.threshold:
-                        node = &self.nodes[node.left_child]
-                    else:
-                        node = &self.nodes[node.right_child]
-
-                out_ptr[i] = <SIZE_t>(node - self.nodes)  // node offset
-
-        return out
-
+#if 0
     cdef inline np.ndarray _apply_sparse_csr(self, object X):
         /* Finds the terminal region (=leaf node) for each sample in sparse X.
 
@@ -3047,22 +2757,6 @@ cdef class Tree:
                 importances /= normalizer
 
         return importances
-
-    cdef np.ndarray _get_value_ndarray(self):
-        /* Wraps value as a 3-d NumPy array.
-
-        The array keeps a reference to this Tree, which manages the underlying
-        memory.
-        */
-        cdef np.npy_intp shape[3]
-        shape[0] = <np.npy_intp> self.node_count
-        shape[1] = <np.npy_intp> self.n_outputs
-        shape[2] = <np.npy_intp> self.max_n_classes
-        cdef np.ndarray arr
-        arr = np.PyArray_SimpleNewFromData(3, shape, np.NPY_DOUBLE, self.value)
-        Py_INCREF(self)
-        arr.base = <PyObject*> self
-        return arr
 
     cdef np.ndarray _get_node_ndarray(self):
         /* Wraps nodes as a NumPy struct array.
