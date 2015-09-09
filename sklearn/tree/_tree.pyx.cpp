@@ -247,8 +247,8 @@ protected:
     }
 
 public:
-    virtual void init(sx::strided_array_view<const DOUBLE_t, 2> y, sx::strided_array_view<const DOUBLE_t> sample_weight,
-        double weighted_n_samples, sx::strided_array_view<const SIZE_t> samples, SIZE_t start,
+    virtual void init(sx::array_view<const DOUBLE_t, 2> y, sx::array_view<const DOUBLE_t> sample_weight,
+        double weighted_n_samples, sx::array_view<const SIZE_t> samples, SIZE_t start,
         SIZE_t end) override {
     /* Initialize the criterion at node samples[start:end] and
     children samples[start:start] and samples[start:end].
@@ -610,10 +610,10 @@ protected:
     }
 
     virtual void init(
-        sx::strided_array_view<const DOUBLE_t, 2> y,
-        sx::strided_array_view<const DOUBLE_t> sample_weight,
+        sx::array_view<const DOUBLE_t, 2> y,
+        sx::array_view<const DOUBLE_t> sample_weight,
         double weighted_n_samples,
-        sx::strided_array_view<const SIZE_t> samples, SIZE_t start,
+        sx::array_view<const SIZE_t> samples, SIZE_t start,
         SIZE_t end) override {
         /* Initialize the criterion at node samples[start:end] and
            children samples[start:start] and samples[start:end].*/
@@ -830,9 +830,9 @@ Splitter(Criterion* criterion, SIZE_t max_features,
 {}
 
 void Splitter::
-init(sx::strided_array_view<const DTYPE_t, 2> X,
-          sx::strided_array_view<const DOUBLE_t, 2> y,
-          sx::strided_array_view<const DOUBLE_t> sample_weight) {
+init(sx::array_view<const DTYPE_t, 2> X,
+          sx::array_view<const DOUBLE_t, 2> y,
+          sx::array_view<const DOUBLE_t> sample_weight) {
 
     // Create a new array which will be used to store nonzero
     // samples from the feature of interest
@@ -896,7 +896,7 @@ node_impurity() const {
 class BaseDenseSplitter
 : public Splitter {
 protected:
-    sx::strided_array_view<const DTYPE_t, 2> X;
+    sx::array_view<const DTYPE_t, 2> X;
 public:
     BaseDenseSplitter(Criterion* criterion, SIZE_t max_features,
                   SIZE_t min_samples_leaf, double min_weight_leaf,
@@ -905,9 +905,9 @@ public:
                random_state)
     {}
 
-    virtual void init(sx::strided_array_view<const DTYPE_t, 2> X,
-              sx::strided_array_view<const DOUBLE_t, 2> y,
-              sx::strided_array_view<const DOUBLE_t> sample_weight) override {
+    virtual void init(sx::array_view<const DTYPE_t, 2> X,
+              sx::array_view<const DOUBLE_t, 2> y,
+              sx::array_view<const DOUBLE_t> sample_weight) override {
         /* Initialize the splitter.*/
 
         // Call parent init
@@ -1264,7 +1264,7 @@ class RandomSplitter
 class PresortBestSplitter
 : public BaseDenseSplitter {
     /* Splitter for finding the best split, using presorting.*/
-    sx::strided_array_view<const DTYPE_t, 2> X_old;
+    sx::array_view<const DTYPE_t, 2> X_old;
     sx::matrix<int32_t> X_argsorted;
 
     SIZE_t n_total_samples;
@@ -1278,9 +1278,9 @@ class PresortBestSplitter
         min_weight_leaf, random_state) {
     }
 
-    virtual void init(sx::strided_array_view<const DTYPE_t, 2> X,
-              sx::strided_array_view<const DOUBLE_t, 2> y,
-              sx::strided_array_view<const DOUBLE_t> sample_weight) override {
+    virtual void init(sx::array_view<const DTYPE_t, 2> X,
+              sx::array_view<const DOUBLE_t, 2> y,
+              sx::array_view<const DOUBLE_t> sample_weight) override {
 
         // Call parent initializer
         BaseDenseSplitter::init(X, y, sample_weight);
@@ -1370,7 +1370,7 @@ class PresortBestSplitter
                 // Extract ordering from X_argsorted
                 SIZE_t p = start;
 
-                sx::strided_array_view<int, 2> a;
+                sx::array_view<int, 2> a;
                 a[{2, 3}];
                 for(auto i: range(n_total_samples)) {
                     SIZE_t j = X_argsorted[{i, current.feature}];
