@@ -2597,14 +2597,15 @@ cdef class BestFirstTreeBuilder(TreeBuilder):
     }
 
     sx::matrix<double> Tree::predict(sx::array_view<DTYPE_t, 2> X) const {
+
         sx::matrix<double> out(sx::matrix<double>::extents_type{X.extents(0), value.extents(1)});
         for(auto i: range(X.extents(0)))
         {
-            auto node_id = apply_single(sx::subvector<DTYPE_t, 2>(X, {i, 0}, 1));
+            auto node_id = apply_single(X(i, {0, sx::end}));
             if(value.extents(1) == 1)
                 out(i, 0) = value(node_id, 0);
             else
-                subvector(out.view(), {i, 0}, 1) <<= subvector(value.view(), {node_id, 0}, 1);
+                out(i, {0, sx::end}) <<= value(node_id, {0, sx::end});
         }
         return out;
     }
@@ -2615,14 +2616,14 @@ cdef class BestFirstTreeBuilder(TreeBuilder):
         while(node->left_child != _TREE_LEAF) {
             // ... and node.right_child != _TREE_LEAF:
             if(x[node->feature] <= node->threshold)
-                node = &nodes[node.left_child];
+                node = &nodes[node->left_child];
             else
-                node = &nodes[node.right_child];
+                node = &nodes[node->right_child];
         }
         return (SIZE_t)(node - nodes.data());  // node offset
     }
 
-    std::vector<SIZE_t> Tree::apply(sx::array_view<DTYPE_t, 2> X) {
+    std::vector<SIZE_t> Tree::apply(sx::array_view<DTYPE_t, 2> X) const {
 #if 0
         if issparse(X):
             return self._apply_sparse_csr(X)
@@ -2631,7 +2632,7 @@ cdef class BestFirstTreeBuilder(TreeBuilder):
             return _apply_dense(X);
     }
 
-    std::vector<SIZE_t> Tree::_apply_dense(sx::array_view<DTYPE_t, 2> X) {
+    std::vector<SIZE_t> Tree::_apply_dense(sx::array_view<DTYPE_t, 2> X) const {
         // Extract input
         SIZE_t n_samples = X.extents(0);
 
@@ -2639,7 +2640,7 @@ cdef class BestFirstTreeBuilder(TreeBuilder):
         std::vector<SIZE_t> out(n_samples);
 
         for(auto i: range(n_samples))
-            out_ptr[i] = _apply_dense(subvector(X, {i, 0}, 1));
+            out[i] = _apply_dense_single(X(i, {0, sx::end}));
         return out;
     }
 
