@@ -1235,8 +1235,8 @@ class PresortBestSplitter
         // Call parent initializer
         BaseDenseSplitter::init(X, y, sample_weight);
         // Pre-sort X
-        if(sx::is_same_view(X_old, X)) {
-            X_old.assign_view(X);
+        if(!sx::is_same_view(X_old, X)) {
+            X_old = X; //shallow copy
             X_argsorted = sx::sortperm<int32_t>(X, 0);
             /*
             for(auto c: range(ncols(X_argsorted))) {
@@ -2601,11 +2601,12 @@ cdef class BestFirstTreeBuilder(TreeBuilder):
         sx::matrix<double> out(sx::matrix<double>::extents_type{X.extents(0), value.extents(1)});
         for(auto i: range(X.extents(0)))
         {
-            auto node_id = apply_single(X(i, {0, sx::end}));
+            auto node_id = apply_single(X(i, sx::all));
             if(value.extents(1) == 1)
                 out(i, 0) = value(node_id, 0);
-            else
-                out(i, {0, sx::end}) <<= value(node_id, {0, sx::end});
+            else {
+                out(i, sx::all) <<= value(node_id, sx::all);
+            }
         }
         return out;
     }
@@ -2640,7 +2641,7 @@ cdef class BestFirstTreeBuilder(TreeBuilder):
         std::vector<SIZE_t> out(n_samples);
 
         for(auto i: range(n_samples))
-            out[i] = _apply_dense_single(X(i, {0, sx::end}));
+            out[i] = _apply_dense_single(X(i, sx::all));
         return out;
     }
 
