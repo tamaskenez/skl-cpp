@@ -10,6 +10,8 @@
 #include "sx/multi_array.h"
 #include "sx/sort.h"
 
+#include "_utils.pxd.h"
+
 namespace sklcpp {
 
 using sx::range;
@@ -65,11 +67,10 @@ TREE_UNDEFINED = -2
 */
     const SIZE_t _TREE_LEAF = -1;
     const SIZE_t _TREE_UNDEFINED = -2;
-    /*
-cdef SIZE_t INITIAL_STACK_SIZE = 10
+const SIZE_t INITIAL_STACK_SIZE = 10;
 
-cdef DTYPE_t MIN_IMPURITY_SPLIT = 1e-7
-*/
+const DTYPE_t MIN_IMPURITY_SPLIT = 1e-7;
+
 // Mitigate precision differences between 32 bit and 64 bit
 const DTYPE_t FEATURE_THRESHOLD = 1e-7;
 /*
@@ -309,7 +310,7 @@ public:
         pos = new_pos;
     }
 
-    virtual void node_value(std::vector<double>* dest) const override {
+    virtual void node_value(sx::array_view<double> dest) const override {
         /* Compute the node value of samples[start:end] and save it into dest.
 
         Parameters
@@ -318,7 +319,9 @@ public:
             The memory address which we will save the node value into.
         */
 
-        dest->assign(BEGINEND(label_count_total));
+        assert(dest.extents(0) == label_count_total.size());
+        std::copy_n(label_count_total.begin(), label_count_total.size(),
+                    dest.begin());
     }
 };
 
@@ -672,11 +675,11 @@ protected:
         }
     }
 
-    virtual void node_value(std::vector<double>* dest) const override {
+    virtual void node_value(sx::array_view<double> dest) const override {
         /* Compute the node value of samples[start:end] into dest.*/
-        dest->resize(n_outputs);
+        assert(dest.extents(0) == n_outputs);
         for(auto k: range(n_outputs))
-            (*dest)[k] = accu(k).mean_total;
+            dest[k] = accu(k).mean_total;
     }
 };
 
@@ -833,7 +836,7 @@ node_reset(SIZE_t start, SIZE_t end,
 }
 
 void Splitter::
-node_value(std::vector<double>* dest) const {
+node_value(sx::array_view<double> dest) const {
     criterion->node_value(dest);
 }
 
@@ -2183,8 +2186,24 @@ cdef class RandomSparseSplitter(BaseSparseSplitter):
 // Tree builders
 // =============================================================================
 
-    void TreeBuilder::_check_input(sx::matrix<DTYPE_t> X, sx::matrix<DOUBLE> y,
-                             sx::matrix<DOUBLE> sample_weight) {
+TreeBuilder::TreeBuilder(Splitter* splitter, SIZE_t min_samples_split,
+              SIZE_t min_samples_leaf, double min_weight_leaf,
+              SIZE_t max_depth)
+              : splitter(splitter)
+              , min_samples_split(min_samples_split)
+              , min_samples_leaf(min_samples_leaf)
+              , min_weight_leaf(min_weight_leaf)
+              , max_depth(max_depth)
+              {}
+
+void TreeBuilder::
+build(Tree& tree, sx::matrix_view<const DTYPE_t> X, sx::matrix_view<const DOUBLE> y) {
+    build(tree, X, y, sx::array_view<const DOUBLE>()); //pass empty sample_weight
+}
+
+    void TreeBuilder::_check_input(sx::matrix_view<const DTYPE_t> X,
+        sx::matrix_view<const DOUBLE> y,
+                             sx::array_view<const DOUBLE> sample_weight) {
         assert(X.extents(0) == y.extents(0));
         if(!sample_weight.empty())
             assert(X.extents(0) == sample_weight.extents(0));
@@ -2198,149 +2217,109 @@ cdef class RandomSparseSplitter(BaseSparseSplitter):
         // if sample_weight is no null and not DOUBLE or not contiguous
         //     copy sample_weight to a DOUBLE C-order array
     }
-}
 
-#if 0
-// Depth first builder ---------------------------------------------------------
-
-cdef class DepthFirstTreeBuilder(TreeBuilder):
+    // Depth first builder ---------------------------------------------------------
+class DepthFirstTreeBuilder : public TreeBuilder {
     /* Build a decision tree in depth-first fashion.*/
 
-    def __cinit__(self, Splitter splitter, SIZE_t min_samples_split,
+    DepthFirstTreeBuilder(Splitter* splitter, SIZE_t min_samples_split,
                   SIZE_t min_samples_leaf, double min_weight_leaf,
-                  SIZE_t max_depth):
-        self.splitter = splitter
-        self.min_samples_split = min_samples_split
-        self.min_samples_leaf = min_samples_leaf
-        self.min_weight_leaf = min_weight_leaf
-        self.max_depth = max_depth
+                  SIZE_t max_depth)
+        : TreeBuilder(splitter,
+            min_samples_split, min_samples_leaf,
+        min_weight_leaf, max_depth)
+        {}
 
-    cpdef build(self, Tree tree, object X, np.ndarray y,
-                np.ndarray sample_weight=None):
+    virtual void build(Tree& tree, sx::matrix_view<const DTYPE_t> X,
+        sx::matrix_view<const DOUBLE> y,
+                             sx::array_view<const DOUBLE> sample_weight) {
         /* Build a decision tree from the training set (X, y).*/
 
         // check input
-        X, y, sample_weight = self._check_input(X, y, sample_weight)
-
-        cdef DOUBLE_t* sample_weight_ptr = NULL
-        if sample_weight is not None:
-            sample_weight_ptr = <DOUBLE_t*> sample_weight.data
+        _check_input(X, y, sample_weight);
 
         // Initial capacity
-        cdef int init_capacity
+        int init_capacity;
 
-        if tree.max_depth <= 10:
-            init_capacity = (2 ** (tree.max_depth + 1)) - 1
-        else:
-            init_capacity = 2047
+        if(tree.max_depth <= 10)
+            init_capacity = (1 << (tree.max_depth + 1)) - 1;
+        else
+            init_capacity = 2047;
 
-        tree._resize(init_capacity)
-
-        // Parameters
-        cdef Splitter splitter = self.splitter
-        cdef SIZE_t max_depth = self.max_depth
-        cdef SIZE_t min_samples_leaf = self.min_samples_leaf
-        cdef double min_weight_leaf = self.min_weight_leaf
-        cdef SIZE_t min_samples_split = self.min_samples_split
+        tree.reserve(init_capacity);
 
         // Recursive partition (without actual recursion)
-        splitter.init(X, y, sample_weight_ptr)
+        splitter->init(X, y, sample_weight);
 
-        cdef SIZE_t start
-        cdef SIZE_t end
-        cdef SIZE_t depth
-        cdef SIZE_t parent
-        cdef bint is_left
-        cdef SIZE_t n_node_samples = splitter.n_samples
-        cdef double weighted_n_samples = splitter.weighted_n_samples
-        cdef double weighted_n_node_samples
-        cdef SplitRecord split
-        cdef SIZE_t node_id
+        SIZE_t n_node_samples = splitter->get_n_samples();
+        SplitRecord split;
 
-        cdef double threshold
-        cdef double impurity = INFINITY
-        cdef SIZE_t n_constant_features
-        cdef bint is_leaf
-        cdef bint first = 1
-        cdef SIZE_t max_depth_seen = -1
-        cdef int rc = 0
+        bool first = true;
+        SIZE_t max_depth_seen = -1;
 
-        cdef Stack stack = Stack(INITIAL_STACK_SIZE)
-        cdef StackRecord stack_record
+        Stack stack(INITIAL_STACK_SIZE);
 
         // push root node onto stack
-        rc = stack.push(0, n_node_samples, 0, _TREE_UNDEFINED, 0, INFINITY, 0)
-        if rc == -1:
-            // got return code -1 - out-of-memory
-            raise MemoryError()
+        stack.push(0, n_node_samples, 0, _TREE_UNDEFINED, 0, INFINITY, 0);
 
-        with nogil:
-            while not stack.is_empty():
-                stack.pop(&stack_record)
+            while(!stack.is_empty()) {
+                StackRecord stack_record;
+                stack.pop(&stack_record);
 
-                start = stack_record.start
-                end = stack_record.end
-                depth = stack_record.depth
-                parent = stack_record.parent
-                is_left = stack_record.is_left
-                impurity = stack_record.impurity
-                n_constant_features = stack_record.n_constant_features
+                auto start = stack_record.start;
+                auto end = stack_record.end;
+                auto depth = stack_record.depth;
+                auto parent = stack_record.parent;
+                auto is_left = stack_record.is_left;
+                auto impurity = stack_record.impurity;
+                auto n_constant_features = stack_record.n_constant_features;
 
-                n_node_samples = end - start
-                splitter.node_reset(start, end, &weighted_n_node_samples)
+                SIZE_t n_node_samples = end - start;
+                double weighted_n_node_samples;
+                splitter->node_reset(start, end, &weighted_n_node_samples);
 
-                is_leaf = ((depth >= max_depth) or
-                           (n_node_samples < min_samples_split) or
-                           (n_node_samples < 2 * min_samples_leaf) or
-                           (weighted_n_node_samples < min_weight_leaf))
+                bool is_leaf = ((depth >= max_depth) ||
+                           (n_node_samples < min_samples_split) ||
+                           (n_node_samples < 2 * min_samples_leaf) ||
+                           (weighted_n_node_samples < min_weight_leaf));
 
-                if first:
-                    impurity = splitter.node_impurity()
-                    first = 0
+                if(first) {
+                    impurity = splitter->node_impurity();
+                    first = false;
+                }
+                is_leaf = is_leaf || (impurity <= MIN_IMPURITY_SPLIT);
 
-                is_leaf = is_leaf or (impurity <= MIN_IMPURITY_SPLIT)
-
-                if not is_leaf:
-                    splitter.node_split(impurity, &split, &n_constant_features)
-                    is_leaf = is_leaf or (split.pos >= end)
-
-                node_id = tree._add_node(parent, is_left, is_leaf, split.feature,
+                if(is_leaf) {
+                    splitter->node_split(impurity, &split, &n_constant_features);
+                    is_leaf = is_leaf || (split.pos >= end);
+                }
+                assert(false); //split uninitialized?
+                SIZE_t node_id = tree._add_node(parent, is_left, is_leaf, split.feature,
                                          split.threshold, impurity, n_node_samples,
-                                         weighted_n_node_samples)
+                                         weighted_n_node_samples);
 
-                if node_id == <SIZE_t>(-1):
-                    rc = -1
-                    break
+                assert(node_id >= 0); //because out of memory will not be signalled this way
 
                 // Store value for all nodes, to facilitate tree/model
                 // inspection and interpretation
-                splitter.node_value(tree.value + node_id * tree.value_stride)
+                splitter->node_value(tree.value(node_id, sx::all));
 
-                if not is_leaf:
+                if(!is_leaf) {
                     // Push right child on stack
-                    rc = stack.push(split.pos, end, depth + 1, node_id, 0,
-                                    split.impurity_right, n_constant_features)
-                    if rc == -1:
-                        break
+                    stack.push(split.pos, end, depth + 1, node_id, 0,
+                                    split.impurity_right, n_constant_features);
 
                     // Push left child on stack
-                    rc = stack.push(start, split.pos, depth + 1, node_id, 1,
-                                    split.impurity_left, n_constant_features)
-                    if rc == -1:
-                        break
-
-                if depth > max_depth_seen:
-                    max_depth_seen = depth
-
-            if rc >= 0:
-                rc = tree._resize_c(tree.node_count)
-
-            if rc >= 0:
-                tree.max_depth = max_depth_seen
-        if rc == -1:
-            raise MemoryError()
-
-
+                    stack.push(start, split.pos, depth + 1, node_id, 1,
+                                    split.impurity_left, n_constant_features);
+                }
+                if(depth > max_depth_seen)
+                    max_depth_seen = depth;
+            } // while
+            tree.max_depth = max_depth_seen;
+}
+};
+#if 0
 // Best first builder ----------------------------------------------------------
 
 cdef inline int _add_to_frontier(PriorityHeapRecord* rec,
@@ -2557,11 +2536,15 @@ cdef class BestFirstTreeBuilder(TreeBuilder):
 // Tree
 // =============================================================================
 
-    namespace sklcpp {
     Tree::Tree(int n_features, NClassesRef n_classes)
     : n_features(n_features)
     , n_classes(n_classes)
     , max_depth(0) {
+    }
+
+    void Tree::reserve(SIZE_t capacity) {
+        nodes.reserve(capacity);
+        value.reserve({capacity, n_classes.n_elements()});
     }
 
     SIZE_t Tree::_add_node(SIZE_t parent, bool is_left, bool is_leaf,
@@ -2570,6 +2553,7 @@ cdef class BestFirstTreeBuilder(TreeBuilder):
         SIZE_t node_id = nodes.size();
 
         nodes.emplace_back();
+        value.resize({value.extents(0) + 1, n_classes.n_elements()}, sx::array_layout::c_order, 0.0);
         Node& node = nodes.back();
         node.impurity = impurity;
         node.n_node_samples = n_node_samples;
@@ -2596,7 +2580,7 @@ cdef class BestFirstTreeBuilder(TreeBuilder):
         return node_id;
     }
 
-    sx::matrix<double> Tree::predict(sx::array_view<DTYPE_t, 2> X) const {
+    sx::matrix<double> Tree::predict(sx::array_view<const DTYPE_t, 2> X) const {
 
         sx::matrix<double> out(sx::matrix<double>::extents_type{X.extents(0), value.extents(1)});
         for(auto i: range(X.extents(0)))
@@ -2611,7 +2595,7 @@ cdef class BestFirstTreeBuilder(TreeBuilder):
         return out;
     }
 
-    SIZE_t Tree::_apply_dense_single(sx::array_view<DTYPE_t> x) const {
+    SIZE_t Tree::_apply_dense_single(sx::array_view<const DTYPE_t> x) const {
         auto node = nodes.data();
         // While node not a leaf
         while(node->left_child != _TREE_LEAF) {
@@ -2624,7 +2608,7 @@ cdef class BestFirstTreeBuilder(TreeBuilder):
         return (SIZE_t)(node - nodes.data());  // node offset
     }
 
-    std::vector<SIZE_t> Tree::apply(sx::array_view<DTYPE_t, 2> X) const {
+    std::vector<SIZE_t> Tree::apply(sx::array_view<const DTYPE_t, 2> X) const {
 #if 0
         if issparse(X):
             return self._apply_sparse_csr(X)
@@ -2633,7 +2617,7 @@ cdef class BestFirstTreeBuilder(TreeBuilder):
             return _apply_dense(X);
     }
 
-    std::vector<SIZE_t> Tree::_apply_dense(sx::array_view<DTYPE_t, 2> X) const {
+    std::vector<SIZE_t> Tree::_apply_dense(sx::array_view<const DTYPE_t, 2> X) const {
         // Extract input
         SIZE_t n_samples = X.extents(0);
 
@@ -2840,4 +2824,4 @@ cdef inline np.ndarray sizet_ptr_to_ndarray(SIZE_t* data, SIZE_t size):
 cdef inline double log(double x) nogil:
     return ln(x) / ln(2.0)
 #endif
-}
+        }

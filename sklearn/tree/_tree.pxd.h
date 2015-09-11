@@ -139,7 +139,7 @@ public:
         stored
     */
 
-    virtual void node_value(std::vector<double>* dest) const = 0;
+    virtual void node_value(sx::array_view<double> dest) const = 0;
 	/* Placeholder for storing the node value.
 
 	Placeholder for a method which will compute the node value
@@ -216,6 +216,9 @@ protected:
     std::vector<SIZE_t> samples;              // Sample indices in X, y
 private:
     SIZE_t n_samples;                         // X.shape[0]
+public:
+    SIZE_t get_n_samples() const { return n_samples; }
+private:
     double weighted_n_samples;                // Weighted number of samples
 protected:
     std::vector<SIZE_t> features;             // Feature indices in X
@@ -314,7 +317,7 @@ public:
                          SIZE_t* n_constant_features) = 0;
     /* Find the best split on node samples[start:end]. */
 
-    void node_value(std::vector<double>* dest) const;
+    void node_value(sx::array_view<double> dest) const;
     /* Copy the value of node samples[start:end] into dest.*/
 
     double node_impurity() const;
@@ -395,7 +398,7 @@ class Tree {
     // The Tree object is a binary tree structure constructed by the
     // TreeBuilder. The tree structure is used for predictions and
     // feature importances.
-
+public:
     // Input/Output layout
     SIZE_t n_features;           // Number of features in X
     NClassesRef n_classes;       // Number of classes in y[:, k]
@@ -408,7 +411,7 @@ class Tree {
 
     // Methods
 	Tree(int n_features, NClassesRef n_classes);
-
+	void reserve(SIZE_t capacity);
     SIZE_t _add_node(SIZE_t parent, bool is_left, bool is_leaf,
                           SIZE_t feature, double threshold, double impurity,
                           SIZE_t n_node_samples,
@@ -422,17 +425,17 @@ class Tree {
 
     //np.ndarray _get_node_ndarray()
 
-    sx::matrix<double> predict(sx::array_view<DTYPE_t, 2> X) const;
+    sx::matrix<double> predict(sx::array_view<const DTYPE_t, 2> X) const;
 	/* Predict target for X.*/
 
-    std::vector<SIZE_t> apply(sx::array_view<DTYPE_t, 2> X) const;
+    std::vector<SIZE_t> apply(sx::array_view<const DTYPE_t, 2> X) const;
 	/* Finds the terminal region (=leaf node) for each sample in X.*/
 
-	std::vector<SIZE_t> _apply_dense(sx::array_view<DTYPE_t, 2> X) const;
+	std::vector<SIZE_t> _apply_dense(sx::array_view<const DTYPE_t, 2> X) const;
 	/* Finds the terminal region (=leaf node) for each sample in X.*/
 
-	SIZE_t apply_single(sx::array_view<DTYPE_t> x) const;
-	SIZE_t _apply_dense_single(sx::array_view<DTYPE_t> x) const;
+	SIZE_t apply_single(sx::array_view<const DTYPE_t> x) const;
+	SIZE_t _apply_dense_single(sx::array_view<const DTYPE_t> x) const;
 
     //np.ndarray _apply_sparse_csr(object X)
 
@@ -452,7 +455,7 @@ class TreeBuilder {
     //
     // This class controls the various stopping criteria and the node splitting
     // evaluation order, e.g. depth-first or best-first.
-
+protected:
     Splitter* splitter;          // Splitting algorithm
 
     SIZE_t min_samples_split;   // Minimum number of samples in an internal node
@@ -460,12 +463,21 @@ class TreeBuilder {
     double min_weight_leaf;     // Minimum weight in a leaf
     SIZE_t max_depth;           // Maximal tree depth
 
-    virtual void build(Tree& tree, sx::matrix<DTYPE_t> X, sx::matrix<DOUBLE> y,
-                             sx::matrix<DOUBLE> sample_weight) = 0;
+protected:
+	TreeBuilder(Splitter* splitter, SIZE_t min_samples_split,
+                  SIZE_t min_samples_leaf, double min_weight_leaf,
+                  SIZE_t max_depth);
+public:
+	void build(Tree& tree, sx::matrix_view<const DTYPE_t> X, sx::matrix_view<const DOUBLE> y);
+private:
+    virtual void build(Tree& tree, sx::matrix_view<const DTYPE_t> X,
+							sx::matrix_view<const DOUBLE> y,
+                             sx::array_view<const DOUBLE> sample_weight) = 0;
 	/* Build a decision tree from the training set (X, y).*/
-
-    void _check_input(sx::matrix<DTYPE_t> X, sx::matrix<DOUBLE> y,
-                             sx::matrix<DOUBLE> sample_weight);
+protected:
+    void _check_input(sx::matrix_view<const DTYPE_t> X,
+						sx::matrix_view<const DOUBLE> y,
+                             sx::array_view<const DOUBLE> sample_weight);
 };
 
 }
