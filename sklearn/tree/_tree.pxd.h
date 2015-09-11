@@ -439,7 +439,8 @@ public:
 
     //np.ndarray _apply_sparse_csr(object X)
 
-    //compute_feature_importances(normalize)
+    std::vector<double> compute_feature_importances(bool normalize = true);
+	/* Computes the importance of each feature (aka variable).*/
 };
 
 // =============================================================================
