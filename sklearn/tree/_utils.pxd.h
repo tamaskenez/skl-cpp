@@ -11,6 +11,7 @@
 
 #include <cstdint>
 #include <vector>
+#include <queue>
 
 namespace sklcpp {
 
@@ -67,36 +68,86 @@ public:
     */
 };
 
-#if 0
 // =============================================================================
 // PriorityHeap data structure
 // =============================================================================
 
 // A record on the frontier for best-first tree growing
-cdef struct PriorityHeapRecord:
-    SIZE_t node_id
-    SIZE_t start
-    SIZE_t end
-    SIZE_t pos
-    SIZE_t depth
-    bint is_leaf
-    double impurity
-    double impurity_left
-    double impurity_right
-    double improvement
+struct PriorityHeapRecord {
+    PriorityHeapRecord() = default;
+    PriorityHeapRecord(
+        SIZE_t node_id,
+        SIZE_t start,
+        SIZE_t end,
+        SIZE_t pos,
+        SIZE_t depth,
+        bool is_leaf,
+        double impurity,
+        double impurity_left,
+        double impurity_right,
+        double improvement
+    ): node_id(node_id)
+    , start(start)
+    , end(end)
+    , pos(pos)
+    , depth(depth)
+    , is_leaf(is_leaf)
+    , impurity(impurity)
+    , impurity_left(impurity_left)
+    , impurity_right(impurity_right)
+    , improvement(improvement)
+    {}
 
-cdef class PriorityHeap:
-    cdef SIZE_t capacity
-    cdef SIZE_t heap_ptr
-    cdef PriorityHeapRecord* heap_
+    SIZE_t node_id;
+    SIZE_t start;
+    SIZE_t end;
+    SIZE_t pos;
+    SIZE_t depth;
+    bool is_leaf;
+    double impurity;
+    double impurity_left;
+    double impurity_right;
+    double improvement;
 
-    cdef bint is_empty(self) nogil
-    cdef int push(self, SIZE_t node_id, SIZE_t start, SIZE_t end, SIZE_t pos,
-                  SIZE_t depth, bint is_leaf, double improvement,
+    bool operator<(const PriorityHeapRecord& x) const {
+        return improvement < x.improvement;
+    }
+};
+
+class PriorityHeap {
+    /* A priority queue implemented as a binary heap.
+
+    The heap invariant is that the impurity improvement of the parent record
+    is larger then the impurity improvement of the children.
+
+    Attributes
+    ----------
+    capacity : SIZE_t
+        The capacity of the heap
+
+    heap_ptr : SIZE_t
+        The water mark of the heap; the heap grows from left to right in the
+        array ``heap_``. The following invariant holds ``heap_ptr < capacity``.
+
+    heap_ : PriorityHeapRecord*
+        The array of heap records. The maximum element is on the left;
+        the heap grows from left to right
+    */
+
+    std::priority_queue<PriorityHeapRecord> heap_;
+public:
+    PriorityHeap(SIZE_t initial_capacity);
+    bool is_empty() const;
+    void push(SIZE_t node_id, SIZE_t start, SIZE_t end, SIZE_t pos,
+                  SIZE_t depth, bool is_leaf, double improvement,
                   double impurity, double impurity_left,
-                  double impurity_right) nogil
-    cdef int pop(self, PriorityHeapRecord* res) nogil
+                  double impurity_right);
+    void push(const PriorityHeapRecord& rec);
+    /* Push record on the priority heap.
+    */
 
-#endif
+    int pop(PriorityHeapRecord* res);
+};
+
 } // namespace sklcpp
 #endif // incl guard

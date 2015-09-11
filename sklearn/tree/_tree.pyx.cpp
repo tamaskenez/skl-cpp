@@ -77,13 +77,13 @@ const DTYPE_t FEATURE_THRESHOLD = 1e-7;
 // Constant to switch between algorithm non zero value extract algorithm
 // in SparseSplitter
 cdef DTYPE_t EXTRACT_NNZ_SWITCH = 0.1
-
+*/
 // Some handy constants (BestFirstTreeBuilder)
-cdef int IS_FIRST = 1
-cdef int IS_NOT_FIRST = 0
-cdef int IS_LEFT = 1
-cdef int IS_NOT_LEFT = 0
-
+    const int IS_FIRST = 1;
+    const int IS_NOT_FIRST = 0;
+    const int IS_LEFT = 1;
+    const int IS_NOT_LEFT = 0;
+/*
 cdef enum:
     // Max value for our rand_r replacement (near the bottom).
     // We don't use RAND_MAX because it's different across platforms and
@@ -2251,7 +2251,6 @@ class DepthFirstTreeBuilder : public TreeBuilder {
         // Recursive partition (without actual recursion)
         splitter->init(X, y, sample_weight);
 
-        SIZE_t n_node_samples = splitter->get_n_samples();
         SplitRecord split;
 
         bool first = true;
@@ -2260,25 +2259,21 @@ class DepthFirstTreeBuilder : public TreeBuilder {
         Stack stack(INITIAL_STACK_SIZE);
 
         // push root node onto stack
-        stack.push(0, n_node_samples, 0, _TREE_UNDEFINED, 0, INFINITY, 0);
+        stack.push(0, splitter->get_n_samples(), 0, _TREE_UNDEFINED, 0, INFINITY, 0);
 
             while(!stack.is_empty()) {
                 StackRecord stack_record;
                 stack.pop(&stack_record);
+                const auto& sr = stack_record;
 
-                auto start = stack_record.start;
-                auto end = stack_record.end;
-                auto depth = stack_record.depth;
-                auto parent = stack_record.parent;
-                auto is_left = stack_record.is_left;
-                auto impurity = stack_record.impurity;
-                auto n_constant_features = stack_record.n_constant_features;
+                auto impurity = sr.impurity;
+                auto n_constant_features = sr.n_constant_features;
 
-                SIZE_t n_node_samples = end - start;
+                const SIZE_t n_node_samples = sr.end - sr.start;
                 double weighted_n_node_samples;
-                splitter->node_reset(start, end, &weighted_n_node_samples);
+                splitter->node_reset(sr.start, sr.end, &weighted_n_node_samples);
 
-                bool is_leaf = ((depth >= max_depth) ||
+                bool is_leaf = ((sr.depth >= max_depth) ||
                            (n_node_samples < min_samples_split) ||
                            (n_node_samples < 2 * min_samples_leaf) ||
                            (weighted_n_node_samples < min_weight_leaf));
@@ -2289,12 +2284,12 @@ class DepthFirstTreeBuilder : public TreeBuilder {
                 }
                 is_leaf = is_leaf || (impurity <= MIN_IMPURITY_SPLIT);
 
-                if(is_leaf) {
+                if(!is_leaf) {
                     splitter->node_split(impurity, &split, &n_constant_features);
-                    is_leaf = is_leaf || (split.pos >= end);
+                    is_leaf = is_leaf || (split.pos >= sr.end);
                 }
                 assert(false); //split uninitialized?
-                SIZE_t node_id = tree._add_node(parent, is_left, is_leaf, split.feature,
+                SIZE_t node_id = tree._add_node(sr.parent, sr.is_left, is_leaf, split.feature,
                                          split.threshold, impurity, n_node_samples,
                                          weighted_n_node_samples);
 
@@ -2306,32 +2301,23 @@ class DepthFirstTreeBuilder : public TreeBuilder {
 
                 if(!is_leaf) {
                     // Push right child on stack
-                    stack.push(split.pos, end, depth + 1, node_id, 0,
+                    stack.push(split.pos, sr.end, sr.depth + 1, node_id, 0,
                                     split.impurity_right, n_constant_features);
 
                     // Push left child on stack
-                    stack.push(start, split.pos, depth + 1, node_id, 1,
+                    stack.push(sr.start, split.pos, sr.depth + 1, node_id, 1,
                                     split.impurity_left, n_constant_features);
                 }
-                if(depth > max_depth_seen)
-                    max_depth_seen = depth;
+                if(sr.depth > max_depth_seen)
+                    max_depth_seen = sr.depth;
             } // while
             tree.max_depth = max_depth_seen;
 }
 };
-#if 0
 // Best first builder ----------------------------------------------------------
 
-cdef inline int _add_to_frontier(PriorityHeapRecord* rec,
-                                 PriorityHeap frontier) nogil:
-    /* Adds record ``rec`` to the priority queue ``frontier``; returns -1
-    on memory-error. */
-    return frontier.push(rec.node_id, rec.start, rec.end, rec.pos, rec.depth,
-                         rec.is_leaf, rec.improvement, rec.impurity,
-                         rec.impurity_left, rec.impurity_right)
-
-
-cdef class BestFirstTreeBuilder(TreeBuilder):
+class BestFirstTreeBuilder
+: public TreeBuilder {
     /* Build a decision tree in best-first fashion.
 
     The best node to expand is given by the node at the frontier that has the
@@ -2339,199 +2325,155 @@ cdef class BestFirstTreeBuilder(TreeBuilder):
 
     NOTE: this TreeBuilder will ignore ``tree.max_depth`` .
     */
-    cdef SIZE_t max_leaf_nodes
+    SIZE_t max_leaf_nodes;
 
-    def __cinit__(self, Splitter splitter, SIZE_t min_samples_split,
-                  SIZE_t min_samples_leaf,  min_weight_leaf,
-                  SIZE_t max_depth, SIZE_t max_leaf_nodes):
-        self.splitter = splitter
-        self.min_samples_split = min_samples_split
-        self.min_samples_leaf = min_samples_leaf
-        self.min_weight_leaf = min_weight_leaf
-        self.max_depth = max_depth
-        self.max_leaf_nodes = max_leaf_nodes
+    BestFirstTreeBuilder(Splitter* splitter, SIZE_t min_samples_split,
+                  SIZE_t min_samples_leaf, double min_weight_leaf,
+                  SIZE_t max_depth, SIZE_t max_leaf_nodes)
+        : TreeBuilder(splitter, min_samples_split,
+            min_samples_leaf, min_weight_leaf,
+            max_depth)
+        , max_leaf_nodes(max_leaf_nodes)
+        {}
 
-    cpdef build(self, Tree tree, object X, np.ndarray y,
-                np.ndarray sample_weight=None):
+    virtual void build(Tree& tree, sx::matrix_view<const DTYPE_t> X,
+                       sx::matrix_view<const DOUBLE> y,
+                       sx::array_view<const DOUBLE> sample_weight) override {
         /* Build a decision tree from the training set (X, y).*/
 
         // check input
-        X, y, sample_weight = self._check_input(X, y, sample_weight)
-
-        cdef DOUBLE_t* sample_weight_ptr = NULL
-        if sample_weight is not None:
-            sample_weight_ptr = <DOUBLE_t*> sample_weight.data
-
-        // Parameters
-        cdef Splitter splitter = self.splitter
-        cdef SIZE_t max_leaf_nodes = self.max_leaf_nodes
-        cdef SIZE_t min_samples_leaf = self.min_samples_leaf
-        cdef double min_weight_leaf = self.min_weight_leaf
-        cdef SIZE_t min_samples_split = self.min_samples_split
+        _check_input(X, y, sample_weight);
 
         // Recursive partition (without actual recursion)
-        splitter.init(X, y, sample_weight_ptr)
+        splitter->init(X, y, sample_weight);
 
-        cdef PriorityHeap frontier = PriorityHeap(INITIAL_STACK_SIZE)
-        cdef PriorityHeapRecord record
-        cdef PriorityHeapRecord split_node_left
-        cdef PriorityHeapRecord split_node_right
+        PriorityHeap frontier(INITIAL_STACK_SIZE);
+        PriorityHeapRecord split_node_left;
 
-        cdef SIZE_t n_node_samples = splitter.n_samples
-        cdef SIZE_t max_split_nodes = max_leaf_nodes - 1
-        cdef bint is_leaf
-        cdef SIZE_t max_depth_seen = -1
-        cdef int rc = 0
-        cdef Node* node
+        //SIZE_t n_node_samples = splitter.n_samples
+        SIZE_t max_split_nodes = max_leaf_nodes - 1;
+        SIZE_t max_depth_seen = -1;
+        //int rc = 0
 
         // Initial capacity
-        cdef SIZE_t init_capacity = max_split_nodes + max_leaf_nodes
-        tree._resize(init_capacity)
+        SIZE_t init_capacity = max_split_nodes + max_leaf_nodes;
+        tree.reserve(init_capacity);
 
-        with nogil:
-            // add root to frontier
-            rc = self._add_split_node(splitter, tree, 0, n_node_samples,
-                                      INFINITY, IS_FIRST, IS_LEFT, NULL, 0,
-                                      &split_node_left)
-            if rc >= 0:
-                rc = _add_to_frontier(&split_node_left, frontier)
-        if rc == -1:
-            raise MemoryError()
+        // add root to frontier
+        _add_split_node(splitter, tree, 0, splitter->get_n_samples(),
+                                  INFINITY, IS_FIRST, IS_LEFT, NULL, 0,
+                        &split_node_left);
+        frontier.push(split_node_left);
 
-        with nogil:
-            while not frontier.is_empty():
-                frontier.pop(&record)
+        while(!frontier.is_empty()) {
+            PriorityHeapRecord record;
+            frontier.pop(&record);
 
-                node = &tree.nodes[record.node_id]
-                is_leaf = (record.is_leaf or max_split_nodes <= 0)
+            Node* node = &tree.nodes[record.node_id];
+            bool is_leaf = (record.is_leaf || max_split_nodes <= 0);
 
-                if is_leaf:
-                    // Node is not expandable; set node as leaf
-                    node.left_child = _TREE_LEAF
-                    node.right_child = _TREE_LEAF
-                    node.feature = _TREE_UNDEFINED
-                    node.threshold = _TREE_UNDEFINED
+            if(is_leaf) {
+                // Node is not expandable; set node as leaf
+                node->left_child = _TREE_LEAF;
+                node->right_child = _TREE_LEAF;
+                node->feature = _TREE_UNDEFINED;
+                node->threshold = _TREE_UNDEFINED;
+            } else {
+                // Node is expandable
 
-                else:
-                    // Node is expandable
+                // Decrement number of split nodes available
+                --max_split_nodes;
 
-                    // Decrement number of split nodes available
-                    max_split_nodes -= 1
+                // Compute left split node
+                _add_split_node(splitter, tree,
+                                          record.start, record.pos,
+                                          record.impurity_left,
+                                          IS_NOT_FIRST, IS_LEFT, node,
+                                          record.depth + 1,
+                                          &split_node_left);
 
-                    // Compute left split node
-                    rc = self._add_split_node(splitter, tree,
-                                              record.start, record.pos,
-                                              record.impurity_left,
-                                              IS_NOT_FIRST, IS_LEFT, node,
-                                              record.depth + 1,
-                                              &split_node_left)
-                    if rc == -1:
-                        break
+                // tree.nodes may have changed
+                node = &tree.nodes[record.node_id];
 
-                    // tree.nodes may have changed
-                    node = &tree.nodes[record.node_id]
+                // Compute right split node
+                PriorityHeapRecord split_node_right;
+                _add_split_node(splitter, tree, record.pos,
+                                          record.end,
+                                          record.impurity_right,
+                                          IS_NOT_FIRST, IS_NOT_LEFT, node,
+                                          record.depth + 1,
+                                &split_node_right);
 
-                    // Compute right split node
-                    rc = self._add_split_node(splitter, tree, record.pos,
-                                              record.end,
-                                              record.impurity_right,
-                                              IS_NOT_FIRST, IS_NOT_LEFT, node,
-                                              record.depth + 1,
-                                              &split_node_right)
-                    if rc == -1:
-                        break
+                // Add nodes to queue
+                frontier.push(split_node_left);
+                frontier.push(split_node_right);
+            }
+            if(record.depth > max_depth_seen)
+                max_depth_seen = record.depth;
+        } // while
+        tree.max_depth = max_depth_seen;
+    }
 
-                    // Add nodes to queue
-                    rc = _add_to_frontier(&split_node_left, frontier)
-                    if rc == -1:
-                        break
 
-                    rc = _add_to_frontier(&split_node_right, frontier)
-                    if rc == -1:
-                        break
-
-                if record.depth > max_depth_seen:
-                    max_depth_seen = record.depth
-
-            if rc >= 0:
-                rc = tree._resize_c(tree.node_count)
-
-            if rc >= 0:
-                tree.max_depth = max_depth_seen
-
-        if rc == -1:
-            raise MemoryError()
-
-    cdef inline int _add_split_node(self, Splitter splitter, Tree tree,
+    void _add_split_node(Splitter* splitter, Tree& tree,
                                     SIZE_t start, SIZE_t end, double impurity,
-                                    bint is_first, bint is_left, Node* parent,
+                                    bool is_first, bool is_left, Node* parent,
                                     SIZE_t depth,
-                                    PriorityHeapRecord* res) nogil:
+                                    PriorityHeapRecord* res) {
         /* Adds node w/ partition ``[start, end)`` to the frontier. */
-        cdef SplitRecord split
-        cdef SIZE_t node_id
-        cdef SIZE_t n_node_samples
-        cdef SIZE_t n_constant_features = 0
-        cdef double weighted_n_samples = splitter.weighted_n_samples
-        cdef double weighted_n_node_samples
-        cdef bint is_leaf
-        cdef SIZE_t n_left, n_right
-        cdef double imp_diff
+        double weighted_n_node_samples;
+        splitter->node_reset(start, end, &weighted_n_node_samples);
 
-        splitter.node_reset(start, end, &weighted_n_node_samples)
+        if(is_first)
+            impurity = splitter->node_impurity();
 
-        if is_first:
-            impurity = splitter.node_impurity()
+        SIZE_t n_node_samples = end - start;
+        bool is_leaf = ((depth > max_depth) ||
+                   (n_node_samples < min_samples_split) ||
+                   (n_node_samples < 2 * min_samples_leaf) ||
+                   (weighted_n_node_samples < min_weight_leaf) ||
+                   (impurity <= MIN_IMPURITY_SPLIT));
 
-        n_node_samples = end - start
-        is_leaf = ((depth > self.max_depth) or
-                   (n_node_samples < self.min_samples_split) or
-                   (n_node_samples < 2 * self.min_samples_leaf) or
-                   (weighted_n_node_samples < self.min_weight_leaf) or
-                   (impurity <= MIN_IMPURITY_SPLIT))
-
-        if not is_leaf:
-            splitter.node_split(impurity, &split, &n_constant_features)
-            is_leaf = is_leaf or (split.pos >= end)
-
-        node_id = tree._add_node(parent - tree.nodes
-                                 if parent != NULL
-                                 else _TREE_UNDEFINED,
-                                 is_left, is_leaf,
-                                 split.feature, split.threshold, impurity, n_node_samples,
-                                 weighted_n_node_samples)
-        if node_id == <SIZE_t>(-1):
-            return -1
+        SplitRecord split;
+        if(!is_leaf) {
+            SIZE_t n_constant_features;
+            splitter->node_split(impurity, &split, &n_constant_features);
+            is_leaf = is_leaf || (split.pos >= end);
+        }
+        assert(false); //split uninitialized?
+        SIZE_t node_id = tree._add_node(
+            parent != NULL ? parent - tree.nodes.data() : _TREE_UNDEFINED,
+            is_left, is_leaf,
+            split.feature, split.threshold, impurity, n_node_samples,
+                                        weighted_n_node_samples);
+        assert(node_id >=0 ); //memory errors not signalled by negative node_id
 
         // compute values also for split nodes (might become leafs later).
-        splitter.node_value(tree.value + node_id * tree.value_stride)
+        splitter->node_value(tree.value(node_id, sx::all));
 
-        res.node_id = node_id
-        res.start = start
-        res.end = end
-        res.depth = depth
-        res.impurity = impurity
+        res->node_id = node_id;
+        res->start = start;
+        res->end = end;
+        res->depth = depth;
+        res->impurity = impurity;
 
-        if not is_leaf:
+        if(!is_leaf) {
             // is split node
-            res.pos = split.pos
-            res.is_leaf = 0
-            res.improvement = split.improvement
-            res.impurity_left = split.impurity_left
-            res.impurity_right = split.impurity_right
-
-        else:
+            res->pos = split.pos;
+            res->is_leaf = false;
+            res->improvement = split.improvement;
+            res->impurity_left = split.impurity_left;
+            res->impurity_right = split.impurity_right;
+        } else {
             // is leaf => 0 improvement
-            res.pos = end
-            res.is_leaf = 1
-            res.improvement = 0.0
-            res.impurity_left = impurity
-            res.impurity_right = impurity
-
-        return 0
-
-
-#endif
+            res->pos = end;
+            res->is_leaf = true;
+            res->improvement = 0.0;
+            res->impurity_left = impurity;
+            res->impurity_right = impurity;
+        }
+    }
+};
 // =============================================================================
 // Tree
 // =============================================================================
