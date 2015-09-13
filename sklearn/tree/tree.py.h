@@ -1,18 +1,19 @@
-"""
+/*
 This module gathers tree-based methods, including decision, regression and
 randomized trees. Single and multi-output problems are both handled.
-"""
+*/
 
-# Authors: Gilles Louppe <g.louppe@gmail.com>
-#          Peter Prettenhofer <peter.prettenhofer@gmail.com>
-#          Brian Holt <bdholt1@gmail.com>
-#          Noel Dawe <noel@dawe.me>
-#          Satrajit Gosh <satrajit.ghosh@gmail.com>
-#          Joly Arnaud <arnaud.v.joly@gmail.com>
-#          Fares Hedayati <fares.hedayati@gmail.com>
-#
-# Licence: BSD 3 clause
+// Authors: Gilles Louppe <g.louppe@gmail.com>
+//          Peter Prettenhofer <peter.prettenhofer@gmail.com>
+//          Brian Holt <bdholt1@gmail.com>
+//          Noel Dawe <noel@dawe.me>
+//          Satrajit Gosh <satrajit.ghosh@gmail.com>
+//          Joly Arnaud <arnaud.v.joly@gmail.com>
+//          Fares Hedayati <fares.hedayati@gmail.com>
+//
+// Licence: BSD 3 clause
 
+#if 0
 from __future__ import division
 
 
@@ -40,70 +41,94 @@ __all__ = ["DecisionTreeClassifier",
            "ExtraTreeClassifier",
            "ExtraTreeRegressor"]
 
+#endif
 
-# =============================================================================
-# Types and constants
-# =============================================================================
+#include "_tree.pxd.h"
+#include "aux_types.h"
+#include "sx/range.h"
+#include "sx/abbrev.h"
 
-DTYPE = _tree.DTYPE
-DOUBLE = _tree.DOUBLE
+namespace sklcpp {
 
-CRITERIA_CLF = {"gini": _tree.Gini, "entropy": _tree.Entropy}
-CRITERIA_REG = {"mse": _tree.MSE, "friedman_mse": _tree.FriedmanMSE}
+using sx::matrix_view;
+using sx::array_view;
+using sx::multi_array;
+using sx::matrix;
+using sx::range;
+// =============================================================================
+// Types and constants
+// =============================================================================
 
-DENSE_SPLITTERS = {"best": _tree.BestSplitter,
-                   "presort-best": _tree.PresortBestSplitter,
-                   "random": _tree.RandomSplitter}
+//CRITERIA_CLF = {"gini": _tree.Gini, "entropy": _tree.Entropy}
+//CRITERIA_REG = {"mse": _tree.MSE, "friedman_mse": _tree.FriedmanMSE}
+//
+//DENSE_SPLITTERS = {"best": _tree.BestSplitter,
+//                   "presort-best": _tree.PresortBestSplitter,
+//                   "random": _tree.RandomSplitter}
+//
+//SPARSE_SPLITTERS = {"best": _tree.BestSparseSplitter,
+//                    "random": _tree.RandomSparseSplitter}
 
-SPARSE_SPLITTERS = {"best": _tree.BestSparseSplitter,
-                    "random": _tree.RandomSparseSplitter}
-
-# =============================================================================
-# Base decision tree
-# =============================================================================
+// =============================================================================
+// Base decision tree
+// =============================================================================
 
 
-class BaseDecisionTree(six.with_metaclass(ABCMeta, BaseEstimator,
-                                          _LearntSelectorMixin)):
-    """Base class for decision trees.
+class BaseDecisionTree
+//(six.with_metaclass(ABCMeta, BaseEstimator,
+//                                          _LearntSelectorMixin)):
+{
+    /*Base class for decision trees.
 
     Warning: This class should not be used directly.
     Use derived classes instead.
-    """
-
-    @abstractmethod
-    def __init__(self,
-                 criterion,
-                 splitter,
-                 max_depth,
-                 min_samples_split,
-                 min_samples_leaf,
-                 min_weight_fraction_leaf,
-                 max_features,
-                 max_leaf_nodes,
-                 random_state,
-                 class_weight=None):
-        self.criterion = criterion
-        self.splitter = splitter
-        self.max_depth = max_depth
-        self.min_samples_split = min_samples_split
-        self.min_samples_leaf = min_samples_leaf
-        self.min_weight_fraction_leaf = min_weight_fraction_leaf
-        self.max_features = max_features
-        self.random_state = random_state
-        self.max_leaf_nodes = max_leaf_nodes
-        self.class_weight = class_weight
-
-        self.n_features_ = None
-        self.n_outputs_ = None
-        self.classes_ = None
-        self.n_classes_ = None
-
-        self.tree_ = None
-        self.max_features_ = None
-
-    def fit(self, X, y, sample_weight=None, check_input=True):
-        """Build a decision tree from the training set (X, y).
+    */
+private:
+    const criterion_union criterion;
+    const splitter_union splitter;
+    const SIZE_t max_depth;
+    const SIZE_t min_samples_split;
+    const SIZE_t min_samples_leaf;
+    const double min_weight_fraction_leaf;
+    const max_features_union max_features;
+    const SIZE_t max_leaf_nodes;
+    std::default_random_engine random_state;
+    const bool is_classification;
+    const class_weight_union class_weight;
+    SIZE_t n_features_ = 0;
+    SIZE_t n_outputs_ = 0;
+    std::vector<std::vector<DOUBLE_t>> classes_; //classes_[output_idx]
+    std::vector<SIZE_t> n_classes_; //n_classes_[output_idx]
+    SIZE_t max_features_ = 0;
+protected:
+    BaseDecisionTree(
+                 criterion_union&& criterion,
+                 splitter_union&& splitter,
+                 SIZE_t max_depth,
+                 SIZE_t min_samples_split,
+                 SIZE_t min_samples_leaf,
+                 double min_weight_fraction_leaf,
+                 max_features_union max_features,
+                 SIZE_t max_leaf_nodes,
+                 std::default_random_engine random_state,
+                 bool is_classification,
+                 class_weight_union&& class_weight = class_weight_union::K_NONE)
+    : criterion(std::move(criterion))
+    , splitter(std::move(splitter))
+        , max_depth(max_depth)
+        , min_samples_split(min_samples_split)
+        , min_samples_leaf(min_samples_leaf)
+        , min_weight_fraction_leaf(min_weight_fraction_leaf)
+        , max_features(max_features)
+    , max_leaf_nodes(max_leaf_nodes)
+        , random_state(random_state)
+        , is_classification(is_classification)
+    , class_weight(std::move(class_weight))
+    {}
+    BaseDecisionTree& fit(
+        matrix_view<const float> X, matrix_view<const double> y,
+        array_view<const double> sample_weight=array_view<const double>()) {
+        /*Build a decision tree from the training set (X, y).
 
         Parameters
         ----------
@@ -132,209 +157,214 @@ class BaseDecisionTree(six.with_metaclass(ABCMeta, BaseEstimator,
         -------
         self : object
             Returns self.
-        """
-        random_state = check_random_state(self.random_state)
-        if check_input:
-            X = check_array(X, dtype=DTYPE, accept_sparse="csc")
-            if issparse(X):
-                X.sort_indices()
+        */
 
-                if X.indices.dtype != np.intc or X.indptr.dtype != np.intc:
-                    raise ValueError("No support for np.int64 index based "
-                                     "sparse matrices")
+        auto& self = *this;
 
-        # Determine output settings
-        n_samples, self.n_features_ = X.shape
-        is_classification = isinstance(self, ClassifierMixin)
+        // Determine output settings
+        auto n_samples = X.extents(0);
+        self.n_features_ = X.extents(1);
 
-        y = np.atleast_1d(y)
-        expanded_class_weight = None
+        std::vector<double> expanded_class_weight;
 
-        if y.ndim == 1:
-            # reshape is necessary to preserve the data contiguity against vs
-            # [:, np.newaxis] that does not.
-            y = np.reshape(y, (-1, 1))
+        self.n_outputs_ = y.extents(1);
 
-        self.n_outputs_ = y.shape[1]
+        matrix<double> y_store_unique_indices;
 
-        if is_classification:
-            y = np.copy(y)
+        if(self.is_classification) {
+            self.classes_.clear();
+            self.n_classes_.clear();
 
-            self.classes_ = []
-            self.n_classes_ = []
+            matrix_view<const double> y_original;
+            if(!self.class_weight.is_none())
+                y_original = y;
 
-            if self.class_weight is not None:
-                y_original = np.copy(y)
+            y_store_unique_indices.assign(y.extents(), sx::array_layout::c_order, 0.0);
+            std::vector<double> v(y.extents(0));
+            for(auto k: range(self.n_outputs_)) {
+                v.assign(BEGINEND(y(sx::all, k)));
+                std::sort(BEGINEND(v));
+                sx::unique_trunc_inplace(v);
+                sx::append(self.classes_, BEGINEND(v));
+                self.n_classes_.push_back(v.size());
+                for(auto ix: range(y.extents(0))) {
+                    auto it = std::lower_bound(BEGINEND(v), y(ix, k));
+                    y_store_unique_indices(ix, k) = it - v.begin();
+                }
+            }
+            y = y_store_unique_indices;
 
-            y_store_unique_indices = np.zeros(y.shape, dtype=np.int)
-            for k in range(self.n_outputs_):
-                classes_k, y_store_unique_indices[:, k] = np.unique(y[:, k], return_inverse=True)
-                self.classes_.append(classes_k)
-                self.n_classes_.append(classes_k.shape[0])
-            y = y_store_unique_indices
-
-            if self.class_weight is not None:
+            if(!self.class_weight.is_none()) {
                 expanded_class_weight = compute_sample_weight(
-                    self.class_weight, y_original)
+                    self.class_weight, y_original);
+            }
+        } else {
+            self.classes_.assign(self.n_outputs_, std::vector<DOUBLE_t>());
+            self.n_classes_.assign(self.n_outputs_, 1);
+        }
 
-        else:
-            self.classes_ = [None] * self.n_outputs_
-            self.n_classes_ = [1] * self.n_outputs_
+        // Check parameters
+        auto max_depth = self.max_depth == 0 ? ((1 << 31) - 1) : self.max_depth;
+        auto max_leaf_nodes = self.max_leaf_nodes == 0 ? -1 : self.max_leaf_nodes;
 
-        self.n_classes_ = np.array(self.n_classes_, dtype=np.intp)
+        int max_features;
+        if(self.max_features.is_auto()) {
+            if(self.is_classification)
+                max_features = std::max(1, int(sqrt(self.n_features_)));
+            else
+                max_features = self.n_features_;
+        } else if(self.max_features.is_sqrt())
+            max_features = std::max(1, int(sqrt(self.n_features_)));
+        else if(self.max_features.is_log2())
+            max_features = std::max(1, int(log2(self.n_features_)));
+        else if(self.max_features.is_none())
+            max_features = self.n_features_;
+        else if(self.max_features.is_int())
+            max_features = self.max_features.i;
+        else {
+            assert(self.max_features.is_float());
+            if(self.max_features.f > 0.0)
+                max_features = std::max(1, int(self.max_features.f * self.n_features_));
+            else
+                max_features = 0;
+        }
+        self.max_features_ = max_features;
 
-        if getattr(y, "dtype", None) != DOUBLE or not y.flags.contiguous:
-            y = np.ascontiguousarray(y, dtype=DOUBLE)
+        if(y.extents(0) != n_samples)
+            throw ValueError(stringf("Number of labels=%d does not match "
+                             "number of samples=%d", (int)y.extents(0), (int)n_samples));
+        if(self.min_samples_split <= 0)
+            throw ValueError("min_samples_split must be greater than zero.");
+        if(self.min_samples_leaf <= 0)
+            throw ValueError("min_samples_leaf must be greater than zero.");
+        if(!sx::leq_and_leq(0, self.min_weight_fraction_leaf, 0.5)
+            throw ValueError("min_weight_fraction_leaf must in [0, 0.5]")
+        if(max_depth <= 0)
+            throw ValueError("max_depth must be greater than zero. ")
+        if(!sx::less_and_leq(0, max_features, self.n_features_))
+            throw ValueError("max_features must be in (0, n_features]")
+        if(sx::less_and_less(-1, max_leaf_nodes, 2)
+            throw ValueError(stringf("max_leaf_nodes %d must be either smaller than "
+                              "0 or larger than 1", (int)max_leaf_nodes));
 
-        # Check parameters
-        max_depth = ((2 ** 31) - 1 if self.max_depth is None
-                     else self.max_depth)
-        max_leaf_nodes = (-1 if self.max_leaf_nodes is None
-                          else self.max_leaf_nodes)
+        if(!isempty(sample_weight) {
+            if(length(sample_weight) != n_samples) {
+                raise ValueError(stringf("Number of weights=%d does not match "
+                                 "number of samples=%d",
+                                 (int)length(sample_weight), (int)n_samples));
+            }
+        }
+        if(!isempty(expanded_class_weight)) {
+            if(!isempty(sample_weight)) {
+                std::vector<double> updated_sample_weight(BEGINEND(sample_weight));
+                assert(length(sample_weight) == length(expanded_class_weight));
+                for(auto i: range(length(sample_weight)))
+                    updated_sample_weight[i] *= expanded_class_weight[i];
+                sample_weight = updated_sample_weight;
+            } else {
+                sample_weight = expanded_class_weight;
+            }
+        }
 
-        if isinstance(self.max_features, six.string_types):
-            if self.max_features == "auto":
-                if is_classification:
-                    max_features = max(1, int(np.sqrt(self.n_features_)))
-                else:
-                    max_features = self.n_features_
-            elif self.max_features == "sqrt":
-                max_features = max(1, int(np.sqrt(self.n_features_)))
-            elif self.max_features == "log2":
-                max_features = max(1, int(np.log2(self.n_features_)))
-            else:
-                raise ValueError(
-                    'Invalid value for max_features. Allowed string '
-                    'values are "auto", "sqrt" or "log2".')
-        elif self.max_features is None:
-            max_features = self.n_features_
-        elif isinstance(self.max_features, (numbers.Integral, np.integer)):
-            max_features = self.max_features
-        else:  # float
-            if self.max_features > 0.0:
-                max_features = max(1, int(self.max_features * self.n_features_))
-            else:
-                max_features = 0
-
-        self.max_features_ = max_features
-
-        if len(y) != n_samples:
-            raise ValueError("Number of labels=%d does not match "
-                             "number of samples=%d" % (len(y), n_samples))
-        if self.min_samples_split <= 0:
-            raise ValueError("min_samples_split must be greater than zero.")
-        if self.min_samples_leaf <= 0:
-            raise ValueError("min_samples_leaf must be greater than zero.")
-        if not 0 <= self.min_weight_fraction_leaf <= 0.5:
-            raise ValueError("min_weight_fraction_leaf must in [0, 0.5]")
-        if max_depth <= 0:
-            raise ValueError("max_depth must be greater than zero. ")
-        if not (0 < max_features <= self.n_features_):
-            raise ValueError("max_features must be in (0, n_features]")
-        if not isinstance(max_leaf_nodes, (numbers.Integral, np.integer)):
-            raise ValueError("max_leaf_nodes must be integral number but was "
-                             "%r" % max_leaf_nodes)
-        if -1 < max_leaf_nodes < 2:
-            raise ValueError(("max_leaf_nodes {0} must be either smaller than "
-                              "0 or larger than 1").format(max_leaf_nodes))
-
-        if sample_weight is not None:
-            if (getattr(sample_weight, "dtype", None) != DOUBLE or
-                    not sample_weight.flags.contiguous):
-                sample_weight = np.ascontiguousarray(
-                    sample_weight, dtype=DOUBLE)
-            if len(sample_weight.shape) > 1:
-                raise ValueError("Sample weights array has more "
-                                 "than one dimension: %d" %
-                                 len(sample_weight.shape))
-            if len(sample_weight) != n_samples:
-                raise ValueError("Number of weights=%d does not match "
-                                 "number of samples=%d" %
-                                 (len(sample_weight), n_samples))
-
-        if expanded_class_weight is not None:
-            if sample_weight is not None:
-                sample_weight = sample_weight * expanded_class_weight
-            else:
-                sample_weight = expanded_class_weight
-
-        # Set min_weight_leaf from min_weight_fraction_leaf
-        if self.min_weight_fraction_leaf != 0. and sample_weight is not None:
+        // Set min_weight_leaf from min_weight_fraction_leaf
+        if(self.min_weight_fraction_leaf != 0. && !isempty(sample_weight)) {
             min_weight_leaf = (self.min_weight_fraction_leaf *
-                               np.sum(sample_weight))
-        else:
+                               sum(sample_weight));
+        } else {
             min_weight_leaf = 0.
+        }
 
-        # Set min_samples_split sensibly
-        min_samples_split = max(self.min_samples_split,
-                                2 * self.min_samples_leaf)
+        // Set min_samples_split sensibly
+        min_samples_split = std::max(self.min_samples_split,
+                                2 * self.min_samples_leaf);
 
-        # Build tree
-        criterion = self.criterion
-        if not isinstance(criterion, Criterion):
-            if is_classification:
-                criterion = CRITERIA_CLF[self.criterion](self.n_outputs_,
-                                                         self.n_classes_)
-            else:
-                criterion = CRITERIA_REG[self.criterion](self.n_outputs_)
+        // Build tree
+        Criterion* criterion = self.criterion.is_object()
+            ? self.criterion.get_object()
+            : nullptr;
+        std::unique_ptr<Criterion> local_criterion_object;
+        if(!criterion) {
+            if(self.is_classification) {
+                if(self.criterion.is_gini())
+                    local_criterion_object = make_unique<Gini>(self.n_outputs_, self.n_classes_);
+                else if(self.criterion.is_entropy())
+                    local_criterion_object = make_unique<Entropy>(self.n_outputs_, self.n_classes_);
+                else
+                    throw std::runtime_error("Classiciation criterion preset can be only gini, entropy");
+            } else {
+                if(self.criterion.is_mse())
+                    local_criterion_object = make_unique<MSE>(self.n_outputs_);
+                else if(self.criterion.is_friedman_mse())
+                    local_criterion_object = make_unique<FriedmanMSE>(self.n_outputs_);
+                else
+                    throw std::runtime_error("Regression criterion preset can be only mse, friedman_mse");
+            }
+            criterion = local_criterion_object.get();
+        }
 
-        SPLITTERS = SPARSE_SPLITTERS if issparse(X) else DENSE_SPLITTERS
+        //SPLITTERS = SPARSE_SPLITTERS if issparse(X) else DENSE_SPLITTERS
 
-        splitter = self.splitter
-        if not isinstance(self.splitter, Splitter):
-            splitter = SPLITTERS[self.splitter](criterion,
-                                                self.max_features_,
-                                                self.min_samples_leaf,
-                                                min_weight_leaf,
-                                                random_state)
+        Splitter* splitter = self.splitter.is_object()
+            ? self.splitter.get_object()
+            : nullptr;
+        std::unique_ptr<Splitter> local_splitter_object;
+        if(!splitter) {
+            if(self.splitter.is_best())
+                local_splitter_object = make_unique<Best>(
+                    criterion, self.max_features_, self.min_samples_leaf,
+                    min_weight_leaf, random_state);
+            else if(self.splitter.is_presort_best())
+                local_splitter_object = make_unique<PresortBest>(
+                    criterion, self.max_features_, self.min_samples_leaf,
+                    min_weight_leaf, random_state);
+            else if(self.splitter.is_random())
+                local_splitter_object = make_unique<Random>(
+                    criterion, self.max_features_, self.min_samples_leaf,
+                    min_weight_leaf, random_state);
+            else
+                throw std::runtime_error("Splitter preset can be only best, presort-best, random");
+            splitter = local_splitter_object.get();
+        }
 
-        self.tree_ = Tree(self.n_features_, self.n_classes_, self.n_outputs_)
+        self.tree_ = make_unique<Tree>(self.n_features_, self.n_classes_, self.n_outputs_);
 
-        # Use BestFirst if max_leaf_nodes given; use DepthFirst otherwise
-        if max_leaf_nodes < 0:
-            builder = DepthFirstTreeBuilder(splitter, min_samples_split,
+        // Use BestFirst if max_leaf_nodes given; use DepthFirst otherwise
+        if(max_leaf_nodes < 0) {
+            builder = make_unique<DepthFirstTreeBuilder>(splitter, min_samples_split,
                                             self.min_samples_leaf,
                                             min_weight_leaf,
-                                            max_depth)
-        else:
-            builder = BestFirstTreeBuilder(splitter, min_samples_split,
+                                            max_depth);
+        } else {
+            builder = make_unique<BestFirstTreeBuilder(splitter, min_samples_split,
                                            self.min_samples_leaf,
                                            min_weight_leaf,
                                            max_depth,
-                                           max_leaf_nodes)
+                                           max_leaf_nodes);
+        }
+        builder->build(self.tree_.get(), X, y, sample_weight);
 
-        builder.build(self.tree_, X, y, sample_weight)
+        return self;
+    }
 
-        if self.n_outputs_ == 1:
-            self.n_classes_ = self.n_classes_[0]
-            self.classes_ = self.classes_[0]
+    void _validate_X_predict(matrix_view<const DTYPE_t> X, bool check_input) {
+        /*Validate X whenever one tries to predict, apply, predict_proba*/
+        auto self = *this;
+        if(!self.tree_)
+            throw NotFittedError("Estimator not fitted, "
+                                 "call `fit` before exploiting the model.");
 
-        return self
+        auto n_features = X.extents(1);
+        if(self.n_features_ != n_features)
+            throw ValueError("Number of features of the model must "
+                             " match the input. Model n_features is %d and "
+                             " input n_features is %d "
+                             , (int)self.n_features_, (int)n_features);
+    }
 
-    def _validate_X_predict(self, X, check_input):
-        """Validate X whenever one tries to predict, apply, predict_proba"""
-        if self.tree_ is None:
-            raise NotFittedError("Estimator not fitted, "
-                                 "call `fit` before exploiting the model.")
-
-        if check_input:
-            X = check_array(X, dtype=DTYPE, accept_sparse="csr")
-            if issparse(X) and (X.indices.dtype != np.intc or
-                                X.indptr.dtype != np.intc):
-                raise ValueError("No support for np.int64 index based "
-                                 "sparse matrices")
-
-        n_features = X.shape[1]
-        if self.n_features_ != n_features:
-            raise ValueError("Number of features of the model must "
-                             " match the input. Model n_features is %s and "
-                             " input n_features is %s "
-                             % (self.n_features_, n_features))
-
-        return X
-
-    def predict(self, X, check_input=True):
-        """Predict class or regression value for X.
+    matrix<DOUBLE_t> predict(
+        matrix_view<const DTYPE_t> X, bool check_input = true
+    ) const {
+        /*Predict class or regression value for X.
 
         For a classification model, the predicted class for each sample in X is
         returned. For a regression model, the predicted value based on X is
@@ -355,36 +385,29 @@ class BaseDecisionTree(six.with_metaclass(ABCMeta, BaseEstimator,
         -------
         y : array of shape = [n_samples] or [n_samples, n_outputs]
             The predicted classes, or the predict values.
-        """
-        X = self._validate_X_predict(X, check_input)
-        proba = self.tree_.predict(X)
-        n_samples = X.shape[0]
+        */
 
-        # Classification
-        if isinstance(self, ClassifierMixin):
-            if self.n_outputs_ == 1:
-                return self.classes_.take(np.argmax(proba, axis=1), axis=0)
+        auto self = *this;
 
-            else:
-                predictions = np.zeros((n_samples, self.n_outputs_))
+        self._validate_X_predict(X, check_input);
+        auto proba = self.tree_.predict(X);
+        auto n_samples = X.extents(0);
 
-                for k in range(self.n_outputs_):
-                    predictions[:, k] = self.classes_[k].take(
-                        np.argmax(proba[:, k], axis=1),
-                        axis=0)
+        // Classification
+        if(is_classification) {
+            matrix<DOUBLE_t> predictions(n_samples, self.n_outputs_);
 
-                return predictions
+            for(auto k: range(self.n_outputs_)) {
+                predictions(sx::all, k) <<=
+                    take_at(self.classes_[k], indmax_along(proba(sx:all, k), 1));
+            }
+            return predictions;
+        // Regression
+        } else {
+            return proba; //[:, :, 0]
 
-        # Regression
-        else:
-            if self.n_outputs_ == 1:
-                return proba[:, 0]
-
-            else:
-                return proba[:, :, 0]
-
-    def apply(self, X, check_input=True):
-        """
+    void apply(matrix_view<DTYPE_T> X, bool check_input = true) const {
+        /*
         Returns the index of the leaf that each sample is predicted as.
 
         Parameters
@@ -405,13 +428,16 @@ class BaseDecisionTree(six.with_metaclass(ABCMeta, BaseEstimator,
             ends up in. Leaves are numbered within
             ``[0; self.tree_.node_count)``, possibly with gaps in the
             numbering.
-        """
-        X = self._validate_X_predict(X, check_input)
-        return self.tree_.apply(X)
+        */
 
-    @property
-    def feature_importances_(self):
-        """Return the feature importances.
+        auto self = *this;
+
+        self._validate_X_predict(X, check_input);
+        return self.tree_.apply(X);
+    }
+
+    void feature_importances_() const {
+        /*Return the feature importances.
 
         The importance of a feature is computed as the (normalized) total
         reduction of the criterion brought by that feature.
@@ -420,20 +446,22 @@ class BaseDecisionTree(six.with_metaclass(ABCMeta, BaseEstimator,
         Returns
         -------
         feature_importances_ : array, shape = [n_features]
-        """
-        if self.tree_ is None:
-            raise NotFittedError("Estimator not fitted, call `fit` before"
-                                 " `feature_importances_`.")
+        */
+        if(!self.tree_)
+            throw NotFittedError("Estimator not fitted, call `fit` before"
+                                 " `feature_importances_`.");
 
-        return self.tree_.compute_feature_importances()
-
-
-# =============================================================================
-# Public estimators
-# =============================================================================
+        return self.tree_.compute_feature_importances();
+    }
+}
+    };
+#if 0
+// =============================================================================
+// Public estimators
+// =============================================================================
 
 class DecisionTreeClassifier(BaseDecisionTree, ClassifierMixin):
-    """A decision tree classifier.
+    /*A decision tree classifier.
 
     Read more in the :ref:`User Guide <tree>`.
 
@@ -562,11 +590,11 @@ class DecisionTreeClassifier(BaseDecisionTree, ClassifierMixin):
     >>> clf = DecisionTreeClassifier(random_state=0)
     >>> iris = load_iris()
     >>> cross_val_score(clf, iris.data, iris.target, cv=10)
-    ...                             # doctest: +SKIP
+    ...                             // doctest: +SKIP
     ...
     array([ 1.     ,  0.93...,  0.86...,  0.93...,  0.93...,
             0.93...,  0.93...,  1.     ,  0.93...,  1.      ])
-    """
+    */
     def __init__(self,
                  criterion="gini",
                  splitter="best",
@@ -591,7 +619,7 @@ class DecisionTreeClassifier(BaseDecisionTree, ClassifierMixin):
             random_state=random_state)
 
     def predict_proba(self, X, check_input=True):
-        """Predict class probabilities of the input samples X.
+        /*Predict class probabilities of the input samples X.
 
         The predicted class probability is the fraction of samples of the same
         class in a leaf.
@@ -613,7 +641,7 @@ class DecisionTreeClassifier(BaseDecisionTree, ClassifierMixin):
             such arrays if n_outputs > 1.
             The class probabilities of the input samples. The order of the
             classes corresponds to that in the attribute `classes_`.
-        """
+        */
         X = self._validate_X_predict(X, check_input)
         proba = self.tree_.predict(X)
 
@@ -638,7 +666,7 @@ class DecisionTreeClassifier(BaseDecisionTree, ClassifierMixin):
             return all_proba
 
     def predict_log_proba(self, X):
-        """Predict class log-probabilities of the input samples X.
+        /*Predict class log-probabilities of the input samples X.
 
         Parameters
         ----------
@@ -653,7 +681,7 @@ class DecisionTreeClassifier(BaseDecisionTree, ClassifierMixin):
             such arrays if n_outputs > 1.
             The class log-probabilities of the input samples. The order of the
             classes corresponds to that in the attribute `classes_`.
-        """
+        */
         proba = self.predict_proba(X)
 
         if self.n_outputs_ == 1:
@@ -667,7 +695,7 @@ class DecisionTreeClassifier(BaseDecisionTree, ClassifierMixin):
 
 
 class DecisionTreeRegressor(BaseDecisionTree, RegressorMixin):
-    """A decision tree regressor.
+    /*A decision tree regressor.
 
     Read more in the :ref:`User Guide <tree>`.
 
@@ -773,11 +801,11 @@ class DecisionTreeRegressor(BaseDecisionTree, RegressorMixin):
     >>> boston = load_boston()
     >>> regressor = DecisionTreeRegressor(random_state=0)
     >>> cross_val_score(regressor, boston.data, boston.target, cv=10)
-    ...                    # doctest: +SKIP
+    ...                    // doctest: +SKIP
     ...
     array([ 0.61..., 0.57..., -0.34..., 0.41..., 0.75...,
             0.07..., 0.29..., 0.33..., -1.42..., -1.77...])
-    """
+    */
     def __init__(self,
                  criterion="mse",
                  splitter="best",
@@ -801,7 +829,7 @@ class DecisionTreeRegressor(BaseDecisionTree, RegressorMixin):
 
 
 class ExtraTreeClassifier(DecisionTreeClassifier):
-    """An extremely randomized tree classifier.
+    /*An extremely randomized tree classifier.
 
     Extra-trees differ from classic decision trees in the way they are built.
     When looking for the best split to separate the samples of a node into two
@@ -823,7 +851,7 @@ class ExtraTreeClassifier(DecisionTreeClassifier):
 
     .. [1] P. Geurts, D. Ernst., and L. Wehenkel, "Extremely randomized trees",
            Machine Learning, 63(1), 3-42, 2006.
-    """
+    */
     def __init__(self,
                  criterion="gini",
                  splitter="random",
@@ -849,7 +877,7 @@ class ExtraTreeClassifier(DecisionTreeClassifier):
 
 
 class ExtraTreeRegressor(DecisionTreeRegressor):
-    """An extremely randomized tree regressor.
+    /*An extremely randomized tree regressor.
 
     Extra-trees differ from classic decision trees in the way they are built.
     When looking for the best split to separate the samples of a node into two
@@ -871,7 +899,7 @@ class ExtraTreeRegressor(DecisionTreeRegressor):
 
     .. [1] P. Geurts, D. Ernst., and L. Wehenkel, "Extremely randomized trees",
            Machine Learning, 63(1), 3-42, 2006.
-    """
+    */
     def __init__(self,
                  criterion="mse",
                  splitter="random",
@@ -892,3 +920,6 @@ class ExtraTreeRegressor(DecisionTreeRegressor):
             max_features=max_features,
             max_leaf_nodes=max_leaf_nodes,
             random_state=random_state)
+#endif
+
+} //namespace sklcpp
