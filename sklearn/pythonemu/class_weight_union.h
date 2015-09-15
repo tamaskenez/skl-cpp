@@ -39,7 +39,8 @@ namespace sklearn {
 		const std::string string;
 
 	    bool is_none() const { return kind == K_NONE; }
-		bool is_string() const { return kind == K_STRING; }
+        bool is_string() const { return kind == K_STRING; }
+        bool is_string(const char* s) const { return is_string() && string == s; }
 		bool is_dicts() const { return kind == K_DICTS; }
 	};
 }

@@ -46,6 +46,8 @@ __all__ = ["DecisionTreeClassifier",
 #include "sx/range.h"
 #include "sx/abbrev.h"
 #include "sx/algorithm.h"
+#include "sx/string.h"
+#include "sx/sort.h"
 
 #include "sklearn/tree/_tree.pxd.h"
 #include "sklearn/tree/aux_types.h"
@@ -97,12 +99,13 @@ private:
     const SIZE_t max_leaf_nodes;
     std::default_random_engine random_state;
     const bool is_classification;
-    const class_weight_union class_weight;
+    const class_weight_union<DOUBLE_t> class_weight;
     SIZE_t n_features_ = 0;
     SIZE_t n_outputs_ = 0;
     std::vector<std::vector<DOUBLE_t>> classes_; //classes_[output_idx]
-    std::vector<SIZE_t> n_classes_; //n_classes_[output_idx]
+    NClasses n_classes_; //n_classes_[output_idx]
     SIZE_t max_features_ = 0;
+    std::unique_ptr<Tree> tree_;
 protected:
     BaseDecisionTree(
                  criterion_union&& criterion,
@@ -115,7 +118,7 @@ protected:
                  SIZE_t max_leaf_nodes,
                  std::default_random_engine random_state,
                  bool is_classification,
-                 class_weight_union&& class_weight = class_weight_union::K_NONE)
+                 class_weight_union<DOUBLE_t>&& class_weight = nullptr)
     : criterion(std::move(criterion))
     , splitter(std::move(splitter))
         , max_depth(max_depth)
@@ -183,12 +186,11 @@ protected:
                 y_original = y;
 
             y_store_unique_indices.assign(y.extents(), sx::array_layout::c_order, 0.0);
-            std::vector<double> v(y.extents(0));
+            std::vector<double> v;
             for(auto k: range(self.n_outputs_)) {
                 v.assign(BEGINEND(y(sx::all, k)));
-                std::sort(BEGINEND(v));
-                sx::unique_trunc_inplace(v);
-                sx::append(self.classes_, BEGINEND(v));
+                sx::sort_unique_inplace(v);
+                self.classes_.emplace_back(v);
                 self.n_classes_.push_back(v.size());
                 for(auto ix: range(y.extents(0))) {
                     auto it = std::lower_bound(BEGINEND(v), y(ix, k));
@@ -211,16 +213,20 @@ protected:
         auto max_leaf_nodes = self.max_leaf_nodes == 0 ? -1 : self.max_leaf_nodes;
 
         int max_features;
-        if(self.max_features.is_auto()) {
-            if(self.is_classification)
+        if(self.max_features.is_string()) {
+            if(self.max_features.is_string("auto")) {
+                if(self.is_classification)
+                    max_features = std::max(1, int(sqrt(self.n_features_)));
+                else
+                    max_features = self.n_features_;
+            } else if(self.max_features.is_string("sqrt"))
                 max_features = std::max(1, int(sqrt(self.n_features_)));
+            else if(self.max_features.is_string("log2"))
+                max_features = std::max(1, int(log2(self.n_features_)));
             else
-                max_features = self.n_features_;
-        } else if(self.max_features.is_sqrt())
-            max_features = std::max(1, int(sqrt(self.n_features_)));
-        else if(self.max_features.is_log2())
-            max_features = std::max(1, int(log2(self.n_features_)));
-        else if(self.max_features.is_none())
+                throw ValueError("Invalid value for max_features. Allowed string "
+                                 "values are \"auto\", \"sqrt\" or \"log2\".");
+        } else if(self.max_features.is_none())
             max_features = self.n_features_;
         else if(self.max_features.is_int())
             max_features = self.max_features.i;
@@ -231,7 +237,10 @@ protected:
             else
                 max_features = 0;
         }
+
         self.max_features_ = max_features;
+
+        using sx::stringf;
 
         if(y.extents(0) != n_samples)
             throw ValueError(stringf("Number of labels=%d does not match "
@@ -240,27 +249,27 @@ protected:
             throw ValueError("min_samples_split must be greater than zero.");
         if(self.min_samples_leaf <= 0)
             throw ValueError("min_samples_leaf must be greater than zero.");
-        if(!sx::leq_and_leq(0, self.min_weight_fraction_leaf, 0.5)
-            throw ValueError("min_weight_fraction_leaf must in [0, 0.5]")
+        if(!sx::leq_and_leq(0, self.min_weight_fraction_leaf, 0.5))
+            throw ValueError("min_weight_fraction_leaf must in [0, 0.5]");
         if(max_depth <= 0)
-            throw ValueError("max_depth must be greater than zero. ")
+            throw ValueError("max_depth must be greater than zero. ");
         if(!sx::less_and_leq(0, max_features, self.n_features_))
-            throw ValueError("max_features must be in (0, n_features]")
-        if(sx::less_and_less(-1, max_leaf_nodes, 2)
+            throw ValueError("max_features must be in (0, n_features]");
+        if(sx::less_and_less(-1, max_leaf_nodes, 2))
             throw ValueError(stringf("max_leaf_nodes %d must be either smaller than "
                               "0 or larger than 1", (int)max_leaf_nodes));
 
-        if(!isempty(sample_weight) {
+        if(!isempty(sample_weight)) {
             if(length(sample_weight) != n_samples) {
-                raise ValueError(stringf("Number of weights=%d does not match "
+                throw ValueError(stringf("Number of weights=%d does not match "
                                  "number of samples=%d",
                                  (int)length(sample_weight), (int)n_samples));
             }
         }
-        if(!isempty(expanded_class_weight)) {
+        if(!sx::isempty(expanded_class_weight)) {
             if(!isempty(sample_weight)) {
                 std::vector<double> updated_sample_weight(BEGINEND(sample_weight));
-                assert(length(sample_weight) == length(expanded_class_weight));
+                assert(length(sample_weight) == sx::length(expanded_class_weight));
                 for(auto i: range(length(sample_weight)))
                     updated_sample_weight[i] *= expanded_class_weight[i];
                 sample_weight = updated_sample_weight;
@@ -269,36 +278,37 @@ protected:
             }
         }
 
+        double min_weight_leaf;
         // Set min_weight_leaf from min_weight_fraction_leaf
         if(self.min_weight_fraction_leaf != 0. && !isempty(sample_weight)) {
             min_weight_leaf = (self.min_weight_fraction_leaf *
                                sum(sample_weight));
         } else {
-            min_weight_leaf = 0.
+            min_weight_leaf = 0.;
         }
 
         // Set min_samples_split sensibly
-        min_samples_split = std::max(self.min_samples_split,
+        int min_samples_split = std::max(self.min_samples_split,
                                 2 * self.min_samples_leaf);
 
         // Build tree
         Criterion* criterion = self.criterion.is_object()
-            ? self.criterion.get_object()
+            ? self.criterion.object.get()
             : nullptr;
         std::unique_ptr<Criterion> local_criterion_object;
         if(!criterion) {
             if(self.is_classification) {
-                if(self.criterion.is_gini())
-                    local_criterion_object = make_unique<Gini>(self.n_outputs_, self.n_classes_);
-                else if(self.criterion.is_entropy())
-                    local_criterion_object = make_unique<Entropy>(self.n_outputs_, self.n_classes_);
+                if(self.criterion.is_string("gini"))
+                    local_criterion_object = std::make_unique<Gini>(self.n_outputs_, self.n_classes_);
+                else if(self.criterion.is_string("entropy"))
+                    local_criterion_object = std::make_unique<Entropy>(self.n_outputs_, self.n_classes_);
                 else
                     throw std::runtime_error("Classiciation criterion preset can be only gini, entropy");
             } else {
-                if(self.criterion.is_mse())
-                    local_criterion_object = make_unique<MSE>(self.n_outputs_);
-                else if(self.criterion.is_friedman_mse())
-                    local_criterion_object = make_unique<FriedmanMSE>(self.n_outputs_);
+                if(self.criterion.is_string("mse"))
+                    local_criterion_object = std::make_unique<MSE>(self.n_outputs_);
+                else if(self.criterion.is_string("friedman_mse"))
+                    local_criterion_object = std::make_unique<FriedmanMSE>(self.n_outputs_);
                 else
                     throw std::runtime_error("Regression criterion preset can be only mse, friedman_mse");
             }
@@ -308,20 +318,20 @@ protected:
         //SPLITTERS = SPARSE_SPLITTERS if issparse(X) else DENSE_SPLITTERS
 
         Splitter* splitter = self.splitter.is_object()
-            ? self.splitter.get_object()
+            ? self.splitter.object.get()
             : nullptr;
         std::unique_ptr<Splitter> local_splitter_object;
         if(!splitter) {
-            if(self.splitter.is_best())
-                local_splitter_object = make_unique<Best>(
+            if(self.splitter.is_string("best"))
+                local_splitter_object = std::make_unique<BestSplitter>(
                     criterion, self.max_features_, self.min_samples_leaf,
                     min_weight_leaf, random_state);
-            else if(self.splitter.is_presort_best())
-                local_splitter_object = make_unique<PresortBest>(
+            else if(self.splitter.is_string("presort_best"))
+                local_splitter_object = std::make_unique<PresortBestSplitter>(
                     criterion, self.max_features_, self.min_samples_leaf,
                     min_weight_leaf, random_state);
-            else if(self.splitter.is_random())
-                local_splitter_object = make_unique<Random>(
+            else if(self.splitter.is_string("random"))
+                local_splitter_object = std::make_unique<RandomSplitter>(
                     criterion, self.max_features_, self.min_samples_leaf,
                     min_weight_leaf, random_state);
             else
@@ -329,39 +339,40 @@ protected:
             splitter = local_splitter_object.get();
         }
 
-        self.tree_ = make_unique<Tree>(self.n_features_, self.n_classes_, self.n_outputs_);
+        self.tree_ = std::make_unique<Tree>(self.n_features_, self.n_classes_, self.n_outputs_);
 
         // Use BestFirst if max_leaf_nodes given; use DepthFirst otherwise
+        std::unique_ptr<TreeBuilder> builder;
         if(max_leaf_nodes < 0) {
-            builder = make_unique<DepthFirstTreeBuilder>(splitter, min_samples_split,
+            builder = std::make_unique<DepthFirstTreeBuilder>(splitter, min_samples_split,
                                             self.min_samples_leaf,
                                             min_weight_leaf,
                                             max_depth);
         } else {
-            builder = make_unique<BestFirstTreeBuilder(splitter, min_samples_split,
+            builder = std::make_unique<BestFirstTreeBuilder>(splitter, min_samples_split,
                                            self.min_samples_leaf,
                                            min_weight_leaf,
                                            max_depth,
                                            max_leaf_nodes);
         }
-        builder->build(self.tree_.get(), X, y, sample_weight);
+        builder->build(*self.tree_, X, y, sample_weight);
 
         return self;
     }
 
-    void _validate_X_predict(matrix_view<const DTYPE_t> X, bool check_input) {
+    void _validate_X_predict(matrix_view<const DTYPE_t> X, bool check_input) const {
         /*Validate X whenever one tries to predict, apply, predict_proba*/
-        auto self = *this;
+        auto& self = *this;
         if(!self.tree_)
             throw NotFittedError("Estimator not fitted, "
                                  "call `fit` before exploiting the model.");
 
         auto n_features = X.extents(1);
         if(self.n_features_ != n_features)
-            throw ValueError("Number of features of the model must "
+            throw ValueError(sx::stringf("Number of features of the model must "
                              " match the input. Model n_features is %d and "
                              " input n_features is %d "
-                             , (int)self.n_features_, (int)n_features);
+                             , (int)self.n_features_, (int)n_features));
     }
 
     matrix<DOUBLE_t> predict(
@@ -390,26 +401,32 @@ protected:
             The predicted classes, or the predict values.
         */
 
-        auto self = *this;
+        auto& self = *this;
 
         self._validate_X_predict(X, check_input);
-        auto proba = self.tree_.predict(X);
+        auto proba = self.tree_->predict(X);
         auto n_samples = X.extents(0);
 
         // Classification
         if(is_classification) {
-            matrix<DOUBLE_t> predictions(n_samples, self.n_outputs_);
+            matrix<DOUBLE_t> predictions({n_samples, self.n_outputs_}, sx::array_layout::c_order);
 
             for(auto k: range(self.n_outputs_)) {
                 predictions(sx::all, k) <<=
-                    take_at(self.classes_[k], indmax_along(proba(sx:all, k), 1));
+                take_at(self.classes_[k],
+                    sx::indmax_along(
+                        proba(sx::all, {n_classes_.offset(k), sx::length = n_classes_.count(k)})
+                        , 1
+                    )
+                );
             }
             return predictions;
         // Regression
         } else {
             return proba; //[:, :, 0]
-
-    void apply(matrix_view<DTYPE_T> X, bool check_input = true) const {
+        }
+    }
+    std::vector<SIZE_t> apply(matrix_view<const DTYPE_t> X, bool check_input = true) const {
         /*
         Returns the index of the leaf that each sample is predicted as.
 
@@ -433,13 +450,13 @@ protected:
             numbering.
         */
 
-        auto self = *this;
+        auto& self = *this;
 
         self._validate_X_predict(X, check_input);
-        return self.tree_.apply(X);
+        return self.tree_->apply(X);
     }
 
-    void feature_importances_() const {
+    std::vector<double> feature_importances_() const {
         /*Return the feature importances.
 
         The importance of a feature is computed as the (normalized) total
@@ -450,14 +467,13 @@ protected:
         -------
         feature_importances_ : array, shape = [n_features]
         */
-        if(!self.tree_)
+        if(!this->tree_)
             throw NotFittedError("Estimator not fitted, call `fit` before"
                                  " `feature_importances_`.");
 
-        return self.tree_.compute_feature_importances();
+        return this->tree_->compute_feature_importances();
     }
-}
-    };
+};
 #if 0
 // =============================================================================
 // Public estimators
@@ -925,4 +941,4 @@ class ExtraTreeRegressor(DecisionTreeRegressor):
             random_state=random_state)
 #endif
 
-} //namespace sklcpp
+} //namespace sklearn

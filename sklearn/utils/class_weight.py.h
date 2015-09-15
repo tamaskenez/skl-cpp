@@ -2,6 +2,8 @@
 #define CLASS_WEIGHT_INCLUDED_1643983423
 
 #include "range/view/take_at.hpp"
+#include "sx/utility.h"
+
 #include "sklearn/pythonemu/class_weight_union.h"
 #include "sklearn/preprocessing/label.py.h"
 #include "sklearn/pythonemu/errors.h"
@@ -20,6 +22,7 @@ namespace sklearn {
 //from .fixes import bincount
 
     using sx::array_view;
+    using sx::matrix_view;
 
 template<typename OutputValue>
 std::vector<double> compute_class_weight(
@@ -78,7 +81,7 @@ std::vector<double> compute_class_weight(
         } else {
             auto recip_freq = length(y) / ((double)length(le.classes_) *
                                    bincount(y_ind));
-            auto weight = sxv::take_at(recip_freq, le.transform(classes));
+            auto weight = view::take_at(recip_freq, le.transform(classes));
         }
     } else {
         // user-defined dictionary
@@ -98,7 +101,7 @@ std::vector<double> compute_class_weight(
     return weight;
 }
 
-template<typename OutputValue, Index>
+template<typename OutputValue, typename Index = std::size_t>
 std::vector<double> compute_sample_weight(
     const class_weight_union<OutputValue>& class_weight,
     matrix_view<const OutputValue> y,
@@ -138,16 +141,15 @@ std::vector<double> compute_sample_weight(
     auto n_outputs = y.extents(1);
 
     if(class_weight.is_string()) {
-        if(
-            strcmp(class_weight.string(), "balanced") != 0
-            && strcmp(class_weight.string(), "auto") != 0)
+        if(!class_weight.is_string("balanced")
+            && !class_weight.is_string("auto"))
         {
-            throw ValueError(stringf("The only valid preset for class_weight is "
+            throw ValueError(sx::stringf("The only valid preset for class_weight is "
                              "\"balanced\". Given \"%s\".", class_weight.string.c_str()));
         }
     } else if(!indices.empty() &&
           !class_weight.is_string()) {
-        throw ValueError(stringf("The only valid class_weight for subsampling is "
+        throw ValueError(sx::stringf("The only valid class_weight for subsampling is "
                          "\"balanced\". Given \"%s\".", class_weight.string.c_str()));
     } else if(n_outputs > 1) {
         if (!class_weight.is_dicts()) {
@@ -160,36 +162,46 @@ std::vector<double> compute_sample_weight(
         }
     }
 
+    namespace view = ranges::view;
+    using sx::range;
+
     std::vector<double> expanded_class_weight(y.extents(0), 1.0);
     for(auto k: range(n_outputs)) {
 
         auto y_full = y(sx::all, k);
-        auto classes_full = sx::sort_unique_inplace(sx::make_vector(y_full));
+        auto classes_full = sx::make_vector(y_full);
+        sx::sort_unique_inplace(classes_full);
         std::vector<OutputValue> classes_missing;
+
+        std::vector<double> weight_k;
 
         if(!indices.empty()) {
             // Get class weights for the subsample, covering all classes in
             // case some labels that were present in the original data are
             // missing from the sample.
-            auto y_subsample = sxv::take_at(y(sx::all, k), indices);
-            auto classes_subsample = sx::sort_unique<vector>(y_subsample);
+            auto y_subsample = view::take_at(y(sx::all, k), indices);
+            auto classes_subsample = sx::sort_unique_inplace(make_vector(y_subsample));
 
             auto indices_of_classes_full_in_classes_subsample = sx::searchsorted<Index>(
                 classes_subsample,
                 classes_full);
 
             auto computed_class_weight =
-                compute_class_weight(class_weight, k
+                compute_class_weight(class_weight, k,
                                      classes_subsample,
                                      y_subsample);
 
-            auto weight_k = sxv::take_at(computed_class_weight,
-                indices_of_classes_full_in_classes_subsample);
+            weight_k = sx::make_vector(
+                view::take_at(
+                    computed_class_weight,
+                    indices_of_classes_full_in_classes_subsample
+                )
+            );
 
             auto classes_missing = set_difference(
-                make_vector(classes_full), classes_subsample);
+                                                  sx::make_vector(classes_full), classes_subsample);
         } else {
-            auto weight_k = compute_class_weight(class_weight_k,
+            weight_k = compute_class_weight(class_weight, k,
                                             classes_full,
                                             y_full);
         }
@@ -197,7 +209,9 @@ std::vector<double> compute_sample_weight(
         auto indices_of_y_full_in_classes_full =
             sx::searchsorted<Index>(classes_full, y_full);
 
-        weight_k = sxv::take_at(weight_k, indices_of_y_full_in_classes_full);
+        weight_k = sx::make_vector(
+            view::take_at(weight_k, indices_of_y_full_in_classes_full)
+        );
 
         if(!classes_missing.empty()) {
             assert(y_full.size() == weight_k.size());

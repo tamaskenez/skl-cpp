@@ -13,7 +13,7 @@
 #include <vector>
 #include <queue>
 
-namespace sklcpp {
+namespace sklearn {
 
 typedef intptr_t SIZE_t;              // Type for indices and counters
 
@@ -149,5 +149,5 @@ public:
     int pop(PriorityHeapRecord* res);
 };
 
-} // namespace sklcpp
+} // namespace sklearn
 #endif // incl guard

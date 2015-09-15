@@ -14,6 +14,15 @@ namespace sklearn {
 		: std::runtime_error(s)
 		{}
 	};
+    class NotFittedError: public std::runtime_error {
+    public:
+        explicit NotFittedError(const char* s)
+        : std::runtime_error(s)
+        {}
+        explicit NotFittedError(const std::string& s)
+        : std::runtime_error(s)
+        {}
+    };
 }
 
 #endif

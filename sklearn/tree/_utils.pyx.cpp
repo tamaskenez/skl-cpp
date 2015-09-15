@@ -10,7 +10,7 @@
 
 #include "_utils.pxd.h"
 
-namespace sklcpp {
+namespace sklearn {
 // =============================================================================
 // Stack data structure
 // =============================================================================
@@ -93,4 +93,4 @@ Stack::Stack(SIZE_t initial_capacity) {
 
         return 0;
     }
-} //namespace sklcpp
+} //namespace sklearn

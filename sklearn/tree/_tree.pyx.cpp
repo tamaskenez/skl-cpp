@@ -12,7 +12,7 @@
 
 #include "_utils.pxd.h"
 
-namespace sklcpp {
+namespace sklearn {
 
 using sx::range;
 
@@ -160,30 +160,7 @@ impurity_improvement(double impurity) const {
             - weighted_n_left / weighted_n_node_samples * impurity_left));
 }
 
-class ClassificationCriterion
-    : public Criterion {
-    /* Abstract criterion for classification.*/
-
-protected:
-    NClassesRef n_classes;
-
-    // These arrays can be indexed by n_classes.idx(output_idx, class_idx)
-    // and have n_classes.n_elements() elements.
-    std::vector<double> label_count_left;
-    std::vector<double> label_count_right;
-    std::vector<double> label_count_total;
-
-protected:
-    ClassificationCriterion(NClassesRef n_classes)
-        /* Initialize attributes for this criterion.
-
-        Parameters
-        ----------
-        n_outputs: SIZE_t
-            The number of targets, the dimensionality of the prediction
-        n_classes: numpy.ndarray, dtype=SIZE_t
-            The number of unique classes in each target
-        */
+    ClassificationCriterion::ClassificationCriterion(NClassesRef n_classes)
         : Criterion(n_classes.n_outputs())
         , n_classes(n_classes)
     {
@@ -197,32 +174,10 @@ protected:
         label_count_total.assign(n_elements, 0.0);
     }
 
-public:
-    virtual void init(sx::array_view<const DOUBLE_t, 2> y, sx::array_view<const DOUBLE_t> sample_weight,
+    void ClassificationCriterion::
+    init(sx::array_view<const DOUBLE_t, 2> y, sx::array_view<const DOUBLE_t> sample_weight,
         double weighted_n_samples, sx::array_view<const SIZE_t> samples, SIZE_t start,
-        SIZE_t end) override {
-    /* Initialize the criterion at node samples[start:end] and
-    children samples[start:start] and samples[start:end].
-
-    Parameters
-    ----------
-    y: array-like, dtype=DOUBLE_t
-        The target stored as a buffer for memory efficiency
-    y_stride: SIZE_t
-        The stride between elements in the buffer, important if there
-        are multiple targets (multi-output)
-    sample_weight: array-like, dtype=DTYPE_t
-        The weight of each sample
-    weighted_n_samples: SIZE_t
-        The total weight of all samples
-    samples: array-like, dtype=SIZE_t
-        A mask on the samples, showing which ones we want to use
-    start: SIZE_t
-        The first sample to use in the mask
-    end: SIZE_t
-        The last sample to use in the mask
-    */
-
+        SIZE_t end) {
         this->y = y;
         this->sample_weight = sample_weight;
         this->samples = samples;
@@ -261,8 +216,8 @@ public:
         reset();
     }
 
-    virtual void reset() override {
-    /* Reset the criterion at pos=start.*/
+    void ClassificationCriterion::
+    reset() {
 
         pos = start;
 
@@ -273,15 +228,8 @@ public:
         label_count_right = label_count_total;
     }
 
-    virtual void update(SIZE_t new_pos) override {
-        /* Updated statistics by moving samples[pos:new_pos] to the left child.
-
-        Parameters
-        ----------
-        new_pos: SIZE_t
-            The new ending position for which to move samples from the right
-            child to the left child.
-        */
+    void ClassificationCriterion::
+    update(SIZE_t new_pos) {
 
         DOUBLE_t w = 1.0;
         DOUBLE_t diff_w = 0.0;
@@ -310,44 +258,16 @@ public:
         pos = new_pos;
     }
 
-    virtual void node_value(sx::array_view<double> dest) const override {
-        /* Compute the node value of samples[start:end] and save it into dest.
-
-        Parameters
-        ----------
-        dest: double pointer
-            The memory address which we will save the node value into.
-        */
-
+    void ClassificationCriterion::
+    node_value(sx::array_view<double> dest) const {
         assert(dest.extents(0) == label_count_total.size());
         std::copy_n(label_count_total.begin(), label_count_total.size(),
                     dest.begin());
     }
-};
 
-class Entropy
-    : public ClassificationCriterion {
 
-public:
-    /* Cross Entropy impurity criterion.
-
-    This handles cases where the target is a classification taking values
-    0, 1, ... K-2, K-1. If node m represents a region Rm with Nm observations,
-    then let
-
-        count_k = 1 / Nm \sum_{x_i in Rm} I(yi = k)
-
-    be the proportion of class k observations in node m.
-
-    The cross-entropy is then defined as
-
-        cross-entropy = -\sum_{k=0}^{K-1} count_k log(count_k)
-    */
-
-    virtual double node_impurity() const override {
-        /* Evaluate the impurity of the current node, i.e. the impurity of
-        samples[start:end], using the cross-entropy criterion.*/
-
+    double Entropy::
+    node_impurity() const {
         double total_entropy = 0.0;
         for(auto k: range(n_outputs)) {
             double entropy = 0.0;
@@ -364,21 +284,9 @@ public:
         return total_entropy / n_outputs;
     }
 
-    virtual void children_impurity(double* impurity_left,
-                                double* impurity_right) const override {
-        /* Evaluate the impurity in children nodes
-
-        i.e. the impurity of the left child (samples[start:pos]) and the
-        impurity the right child (samples[pos:end]).
-
-        Parameters
-        ----------
-        impurity_left: double pointer
-            The memory address to save the impurity of the left node
-        impurity_right: double pointer
-            The memory address to save the impurity of the right node
-        */
-
+    void Entropy::
+    children_impurity(double* impurity_left,
+                                double* impurity_right) const {
         double total_left = 0.0;
         double total_right = 0.0;
 
@@ -405,31 +313,9 @@ public:
         *impurity_left = total_left / n_outputs;
         *impurity_right = total_right / n_outputs;
     }
-};
 
-class Gini
-    : public ClassificationCriterion {
-public:
-    /* Gini Index impurity criterion.
-
-    This handles cases where the target is a classification taking values
-    0, 1, ... K-2, K-1. If node m represents a region Rm with Nm observations,
-    then let
-
-        count_k = 1/ Nm \sum_{x_i in Rm} I(yi = k)
-
-    be the proportion of class k observations in node m.
-
-    The Gini Index is then defined as:
-
-        index = \sum_{k=0}^{K-1} count_k (1 - count_k)
-              = 1 - \sum_{k=0}^{K-1} count_k ** 2
-    */
-
-    virtual double node_impurity() const override {
-        /* Evaluate the impurity of the current node, i.e. the impurity of
-        samples[start:end] using the Gini criterion.*/
-
+    double Gini::
+    node_impurity() const {
         double total = 0.0;
 
         for(auto k: range(n_outputs)) {
@@ -447,21 +333,9 @@ public:
         return total / n_outputs;
     }
 
-    virtual void children_impurity(double* impurity_left,
-                                   double* impurity_right) const override {
-        /* Evaluate the impurity in children nodes
-
-        i.e. the impurity of the left child (samples[start:pos]) and the
-        impurity the right child (samples[pos:end]) using the Gini index.
-
-        Parameters
-        ----------
-        impurity_left: DTYPE_t
-            The memory address to save the impurity of the left node to
-        impurity_right: DTYPE_t
-            The memory address to save the impurity of the right node to
-        */
-
+    void Gini::
+    children_impurity(double* impurity_left,
+                                   double* impurity_right) const {
         double total_left = 0.0;
         double total_right = 0.0;
 
@@ -491,85 +365,37 @@ public:
         *impurity_left = total_left / n_outputs;
         *impurity_right = total_right / n_outputs;
     }
-};
 
-class RegressionCriterion
-    : public Criterion {
-    /* Abstract regression criterion.
-
-    This handles cases where the target is a continuous value, and is
-    evaluated by computing the variance of the target values left and right
-    of the split point. The computation takes linear time with `n_samples`
-    by using ::
-
-        var = \sum_i^n (y_i - y_bar) ** 2
-            = (\sum_i^n y_i ** 2) - n_samples * y_bar ** 2
-    */
-protected:
-    struct accumulators_t {
-        double mean_left;
-        double mean_right;
-        double mean_total;
-        double sq_sum_left;
-        double sq_sum_right;
-        double sq_sum_total;
-        double var_left;
-        double var_right;
-        double sum_left;
-        double sum_right;
-        double sum_total;
-        void set_zero() {
-            mean_left = 0.0;
-            mean_right = 0.0;
-            mean_total = 0.0;
-            sq_sum_left = 0.0;
-            sq_sum_right = 0.0;
-            sq_sum_total = 0.0;
-            var_left = 0.0;
-            var_right = 0.0;
-            sum_left = 0.0;
-            sum_right = 0.0;
-            sum_total = 0.0;
-        }
-    };
-
-    accumulators_t first_output_accumulators;
-    std::vector<accumulators_t> remaining_outputs_accumulators;
-
-    inline accumulators_t& accu(SIZE_t idx) {
+    inline RegressionCriterion::accumulators_t&
+    RegressionCriterion::
+    accu(SIZE_t idx) {
         return idx == 0
             ? first_output_accumulators
             : remaining_outputs_accumulators[idx-1];
     }
-    inline const accumulators_t& accu(SIZE_t idx) const {
+    inline const RegressionCriterion::accumulators_t&
+    RegressionCriterion::
+    accu(SIZE_t idx) const {
         return idx == 0
         ? first_output_accumulators
         : remaining_outputs_accumulators[idx-1];
     }
 
+    RegressionCriterion::
     RegressionCriterion(SIZE_t n_outputs)
     : Criterion(n_outputs) {
-        /* Initialize parameters for this criterion.
-
-        Parameters
-        ----------
-        n_outputs: SIZE_t
-            The number of targets to be predicted
-        */
-
         // Allocate memory for the accumulators
         if(n_outputs > 0)
             remaining_outputs_accumulators.resize(n_outputs - 1);
     }
 
-    virtual void init(
+    void RegressionCriterion::
+    init(
         sx::array_view<const DOUBLE_t, 2> y,
         sx::array_view<const DOUBLE_t> sample_weight,
         double weighted_n_samples,
         sx::array_view<const SIZE_t> samples, SIZE_t start,
-        SIZE_t end) override {
-        /* Initialize the criterion at node samples[start:end] and
-           children samples[start:start] and samples[start:end].*/
+        SIZE_t end) {
         // Initialize fields
         this->y = y;
         this->sample_weight = sample_weight;
@@ -612,8 +438,8 @@ protected:
         reset();
     }
 
-    virtual void reset() override {
-        /* Reset the criterion at pos=start.*/
+    void RegressionCriterion::
+    reset() {
         pos = start;
 
         weighted_n_left = 0.0;
@@ -633,9 +459,8 @@ protected:
         }
     }
 
-    virtual void update(SIZE_t new_pos) override {
-        /* Updated statistics by moving samples[pos:new_pos] to the left.*/
-
+    void RegressionCriterion::
+    update(SIZE_t new_pos) {
         DOUBLE_t w = 1.0;
         DOUBLE_t diff_w = 0.0;
 
@@ -675,23 +500,15 @@ protected:
         }
     }
 
-    virtual void node_value(sx::array_view<double> dest) const override {
-        /* Compute the node value of samples[start:end] into dest.*/
+    void RegressionCriterion::
+    node_value(sx::array_view<double> dest) const {
         assert(dest.extents(0) == n_outputs);
         for(auto k: range(n_outputs))
             dest[k] = accu(k).mean_total;
     }
-};
 
-class MSE
-: public RegressionCriterion {
-    /* Mean squared error impurity criterion.
-
-        MSE = var_left + var_right
-    */
-    virtual double node_impurity() const override {
-        /* Evaluate the impurity of the current node, i.e. the impurity of
-           samples[start:end].*/
+    double MSE::
+    node_impurity() const {
         double total = 0.0;
 
         for(auto k: range(n_outputs)) {
@@ -703,11 +520,9 @@ class MSE
         return total / n_outputs;
     }
 
-    virtual void children_impurity(double* impurity_left,
-                                double* impurity_right) const override {
-        /* Evaluate the impurity in children nodes, i.e. the impurity of the
-           left child (samples[start:pos]) and the impurity the right child
-           (samples[pos:end]).*/
+    void MSE::
+    children_impurity(double* impurity_left,
+                                double* impurity_right) const {
         double total_left = 0.0;
         double total_right = 0.0;
 
@@ -720,19 +535,9 @@ class MSE
         *impurity_left = total_left / n_outputs;
         *impurity_right = total_right / n_outputs;
     }
-};
 
-class FriedmanMSE
-: public MSE {
-    /* Mean squared error impurity criterion with improvement score by Friedman
-
-    Uses the formula (35) in Friedmans original Gradient Boosting paper:
-
-        diff = mean_left - mean_right
-        improvement = n_left * n_right * diff^2 / (n_left + n_right)
-    */
-
-    virtual double impurity_improvement(double impurity) const override {
+    double FriedmanMSE::
+    impurity_improvement(double impurity) const {
         double total_sum_left = 0.0;
         double total_sum_right = 0.0;
 
@@ -750,7 +555,6 @@ class FriedmanMSE
         return (weighted_n_left * weighted_n_right * diff * diff /
                 (weighted_n_left + weighted_n_right));
     }
-};
 
 // =============================================================================
 // Splitter
@@ -846,11 +650,7 @@ node_impurity() const {
     return criterion->node_impurity();
 }
 
-class BaseDenseSplitter
-: public Splitter {
-protected:
-    sx::array_view<const DTYPE_t, 2> X;
-public:
+    BaseDenseSplitter::
     BaseDenseSplitter(Criterion* criterion, SIZE_t max_features,
                   SIZE_t min_samples_leaf, double min_weight_leaf,
                   std::default_random_engine* random_state)
@@ -858,25 +658,21 @@ public:
                random_state)
     {}
 
-    virtual void init(sx::array_view<const DTYPE_t, 2> X,
+    void BaseDenseSplitter::
+    init(sx::array_view<const DTYPE_t, 2> X,
               sx::array_view<const DOUBLE_t, 2> y,
-              sx::array_view<const DOUBLE_t> sample_weight) override {
-        /* Initialize the splitter.*/
-
+              sx::array_view<const DOUBLE_t> sample_weight) {
         // Call parent init
         Splitter::init(X, y, sample_weight);
 
         // Initialize X
         this->X = X;
     }
-};
 
-class BestSplitter
-: public BaseDenseSplitter {
-    /* Splitter for finding the best split.*/
-    virtual void node_split(double impurity, SplitRecord* split,
-                         SIZE_t* n_constant_features) override {
-        /* Find the best split on node samples[start:end].*/
+
+    void BestSplitter::
+    node_split(double impurity, SplitRecord* split,
+                         SIZE_t* n_constant_features) {
         // Find the best split
 
         auto& Xf = feature_values;
@@ -1037,15 +833,10 @@ class BestSplitter
         *split = best;
         *n_constant_features = n_total_constants;
     }
-};
 
-
-class RandomSplitter
-: public BaseDenseSplitter {
-    /* Splitter for finding the best random split.*/
-    virtual void node_split(double impurity, SplitRecord* split,
-                         SIZE_t* n_constant_features) override {
-        /* Find the best random split on node samples[start:end].*/
+    void RandomSplitter::
+    node_split(double impurity, SplitRecord* split,
+                         SIZE_t* n_constant_features) {
         // Draw random splits and pick the best
         auto& Xf = feature_values;
 
@@ -1211,18 +1002,8 @@ class RandomSplitter
         *split = best;
         *n_constant_features = n_total_constants;
     }
-};
 
-
-class PresortBestSplitter
-: public BaseDenseSplitter {
-    /* Splitter for finding the best split, using presorting.*/
-    sx::array_view<const DTYPE_t, 2> X_old;
-    sx::matrix<int32_t> X_argsorted;
-
-    SIZE_t n_total_samples;
-    std::vector<bool> sample_mask;
-
+    PresortBestSplitter::
     PresortBestSplitter(Criterion* criterion, SIZE_t max_features,
                   SIZE_t min_samples_leaf,
                   double min_weight_leaf,
@@ -1231,9 +1012,10 @@ class PresortBestSplitter
         min_weight_leaf, random_state) {
     }
 
-    virtual void init(sx::array_view<const DTYPE_t, 2> X,
+    void PresortBestSplitter::
+    init(sx::array_view<const DTYPE_t, 2> X,
               sx::array_view<const DOUBLE_t, 2> y,
-              sx::array_view<const DOUBLE_t> sample_weight) override {
+              sx::array_view<const DOUBLE_t> sample_weight) {
 
         // Call parent initializer
         BaseDenseSplitter::init(X, y, sample_weight);
@@ -1254,9 +1036,9 @@ class PresortBestSplitter
         }
     }
 
-    virtual void node_split(double impurity, SplitRecord* split,
-                         SIZE_t* n_constant_features) override {
-        /* Find the best split on node samples[start:end].*/
+    void PresortBestSplitter::
+    node_split(double impurity, SplitRecord* split,
+                         SIZE_t* n_constant_features) {
         // Find the best split
         auto& Xf = feature_values;
 
@@ -1427,7 +1209,6 @@ class PresortBestSplitter
         *split = best;
         *n_constant_features = n_total_constants;
     }
-};
 
 #if 0
 cdef class BaseSparseSplitter(Splitter):
@@ -2219,9 +2000,7 @@ build(Tree& tree, sx::matrix_view<const DTYPE_t> X, sx::matrix_view<const DOUBLE
     }
 
     // Depth first builder ---------------------------------------------------------
-class DepthFirstTreeBuilder : public TreeBuilder {
-    /* Build a decision tree in depth-first fashion.*/
-
+    DepthFirstTreeBuilder::
     DepthFirstTreeBuilder(Splitter* splitter, SIZE_t min_samples_split,
                   SIZE_t min_samples_leaf, double min_weight_leaf,
                   SIZE_t max_depth)
@@ -2230,11 +2009,10 @@ class DepthFirstTreeBuilder : public TreeBuilder {
         min_weight_leaf, max_depth)
         {}
 
-    virtual void build(Tree& tree, sx::matrix_view<const DTYPE_t> X,
+    void DepthFirstTreeBuilder::
+    build(Tree& tree, sx::matrix_view<const DTYPE_t> X,
         sx::matrix_view<const DOUBLE> y,
                              sx::array_view<const DOUBLE> sample_weight) {
-        /* Build a decision tree from the training set (X, y).*/
-
         // check input
         _check_input(X, y, sample_weight);
 
@@ -2313,20 +2091,9 @@ class DepthFirstTreeBuilder : public TreeBuilder {
             } // while
             tree.max_depth = max_depth_seen;
 }
-};
 // Best first builder ----------------------------------------------------------
 
-class BestFirstTreeBuilder
-: public TreeBuilder {
-    /* Build a decision tree in best-first fashion.
-
-    The best node to expand is given by the node at the frontier that has the
-    highest impurity improvement.
-
-    NOTE: this TreeBuilder will ignore ``tree.max_depth`` .
-    */
-    SIZE_t max_leaf_nodes;
-
+    BestFirstTreeBuilder::
     BestFirstTreeBuilder(Splitter* splitter, SIZE_t min_samples_split,
                   SIZE_t min_samples_leaf, double min_weight_leaf,
                   SIZE_t max_depth, SIZE_t max_leaf_nodes)
@@ -2336,11 +2103,10 @@ class BestFirstTreeBuilder
         , max_leaf_nodes(max_leaf_nodes)
         {}
 
-    virtual void build(Tree& tree, sx::matrix_view<const DTYPE_t> X,
+    void BestFirstTreeBuilder::
+    build(Tree& tree, sx::matrix_view<const DTYPE_t> X,
                        sx::matrix_view<const DOUBLE> y,
-                       sx::array_view<const DOUBLE> sample_weight) override {
-        /* Build a decision tree from the training set (X, y).*/
-
+                       sx::array_view<const DOUBLE> sample_weight) {
         // check input
         _check_input(X, y, sample_weight);
 
@@ -2415,12 +2181,12 @@ class BestFirstTreeBuilder
     }
 
 
-    void _add_split_node(Splitter* splitter, Tree& tree,
+    void BestFirstTreeBuilder::
+    _add_split_node(Splitter* splitter, Tree& tree,
                                     SIZE_t start, SIZE_t end, double impurity,
                                     bool is_first, bool is_left, Node* parent,
                                     SIZE_t depth,
                                     PriorityHeapRecord* res) {
-        /* Adds node w/ partition ``[start, end)`` to the frontier. */
         double weighted_n_node_samples;
         splitter->node_reset(start, end, &weighted_n_node_samples);
 
@@ -2473,7 +2239,7 @@ class BestFirstTreeBuilder
             res->impurity_right = impurity;
         }
     }
-};
+
 // =============================================================================
 // Tree
 // =============================================================================

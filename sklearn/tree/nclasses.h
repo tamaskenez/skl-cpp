@@ -2,8 +2,9 @@
 #define NCLASSES_INCLUDED_24703974234
 
 #include <vector>
+#include "sx/range.h"
 
-namespace sklcpp {
+namespace sklearn {
 	// Defines the NClasses and NClassesRef classes
 	// NClasses the main class which owns the data, NClassesRef
 	// is a weak pointer and also reader interface to NClasses
@@ -36,10 +37,10 @@ namespace sklcpp {
 	  {}
 
 	  int n_outputs() const { return n_outputs_; }
-	  inline int count(int i) const { return n_classes_ptr ? n_classes_ptr[i].n_classes : 1; }
-	  inline int offset(int i) const { return n_classes_ptr ? n_classes_ptr[i].offset : i; }
+	  inline int count(int output_idx) const { return n_classes_ptr ? n_classes_ptr[output_idx].n_classes : 1; }
+	  inline int offset(int output_idx) const { return n_classes_ptr ? n_classes_ptr[output_idx].offset : output_idx; }
 	  int n_elements() const { return n_classes_ptr ? n_classes_ptr[n_outputs()].offset : n_outputs(); }
-	  inline int idx(int output_idx, int class_idx) const {
+	  inline int offset(int output_idx, int class_idx) const {
 	    assert(0 <= output_idx && output_idx < n_outputs());
 	    assert(0 <= class_idx && class_idx < count(output_idx));
 	    return offset(output_idx) + class_idx;
@@ -62,6 +63,18 @@ namespace sklcpp {
 	        n_classes_ptr = v.data();
 	      n_outputs_ = v.size() - 1;
 	  }
+        void clear() {
+            n_outputs_ = 0;
+            n_classes_ptr = nullptr;
+            v.assign(1, Item{0, 0});
+        }
+        void assign(int n_outputs, int n_classes) {
+            clear();
+            for(int i: sx::range(n_outputs)) {
+                (void)i;
+                push_back(n_classes);
+            }
+        }
 	};
 }
 
