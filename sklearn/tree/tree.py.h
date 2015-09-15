@@ -43,12 +43,15 @@ __all__ = ["DecisionTreeClassifier",
 
 #endif
 
-#include "_tree.pxd.h"
-#include "aux_types.h"
 #include "sx/range.h"
 #include "sx/abbrev.h"
+#include "sx/algorithm.h"
 
-namespace sklcpp {
+#include "sklearn/tree/_tree.pxd.h"
+#include "sklearn/tree/aux_types.h"
+#include "sklearn/utils/class_weight.py.h"
+
+namespace sklearn {
 
 using sx::matrix_view;
 using sx::array_view;

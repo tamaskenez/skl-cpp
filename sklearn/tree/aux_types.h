@@ -5,45 +5,6 @@
 
 namespace sklcpp {
 
-	// ad-hoc discriminative union of
-	// - list of dicts (flat maps), one for each output
-	// - "balanced"
-	// - or none of the above
-	struct class_weight_union {
-        enum kind_t {K_NONE, K_DICTS, K_BALANCED};
-
-        using dict_value_t = std::pair<int, double>;
-	    using dict_t = std::vector<dict_value_t>; //implements flat map (sorted)
-
-        class_weight_union() = delete;
-        class_weight_union(kind_t kind)
-        : kind(kind) {}
-		class_weight_union(const class_weight_union&) = delete;
-		class_weight_union(class_weight_union&& x)
-        : dicts(std::move(x.dicts))
-        , kind(x.kind)
-        {
-		}
-
-		class_weight_union(const char* s)
-		: kind(K_BALANCED)
-		{
-			if(strcmp(s, "balanced"))
-				throw std::runtime_error("class_weight_union: the only acceptable string argument is 'balanced'");
-		}
-        class_weight_union(std::vector<dict_t>&& dicts)
-		: dicts(std::move(dicts))
-        , kind(K_DICTS)
-		{}
-
-	    // dicts and b_balanced are mutually exclusive
-	    std::vector<dict_t> dicts; //dicts[output_idx]
-		const kind_t kind;
-
-	    bool is_none() const { return kind == K_NONE; }
-		bool is_balanced() const { return kind == K_BALANCED; }
-		bool is_dicts() const { return kind == K_DICTS; }
-	};
 
 	// ad-hoc discriminative union of
 	// - int
