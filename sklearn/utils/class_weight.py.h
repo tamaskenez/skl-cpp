@@ -85,21 +85,27 @@ std::vector<double> compute_class_weight(
                 sx::make_vector(view::take_at(recip_freq, le.transform(classes)))
                 , sx::mean(recip_freq));
         } else {
-            auto recip_freq = length(y) / ((double)length(le.classes_) *
-                                   bincount(y_ind));
-            auto weight = view::take_at(recip_freq, le.transform(classes));
+            auto recip_freq =
+                sx::scalar_div_range(
+                    sx::length(y)
+                    ,   sx::range_mul_scalar(
+                            sx::bincount<double>(y_ind)
+                            ,   sx::length(le.classes_)
+                        )
+                );
+            weight = sx::make_vector<double>(view::take_at(recip_freq, le.transform(classes)));
         }
     } else {
         // user-defined dictionary
         std::vector<double> weight(classes.size(), 1.0);
-        if(!class_weight.is_dict()) {
-            throw ValueError(stringf("class_weight must be dict, 'auto', or None,"
+        if(!class_weight.is_dicts()) {
+            throw ValueError(sx::stringf("class_weight must be dict, 'auto', or None,"
                              " got: %s", class_weight.string));
         }
         for(auto c: class_weight.dicts[output_idx]) {
             auto i = std::lower_bound(BEGINEND(classes), c.first);
             if(i == classes.end() || *i != c.first)
-                throw ValueError(stringf("Class label %f not present.", c.first));
+                throw ValueError(sx::stringf("Class label %f not present.", c.first));
             else
                 weight[i-classes.begin()] = c.second;
         }

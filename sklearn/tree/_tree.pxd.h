@@ -273,6 +273,10 @@ public:
         cross-entropy = -\sum_{k=0}^{K-1} count_k log(count_k)
     */
 
+    Entropy(NClassesRef n_classes)
+    : ClassificationCriterion(n_classes)
+    {}
+
     virtual double node_impurity() const override;
         /* Evaluate the impurity of the current node, i.e. the impurity of
         samples[start:end], using the cross-entropy criterion.*/
@@ -311,6 +315,10 @@ public:
         index = \sum_{k=0}^{K-1} count_k (1 - count_k)
               = 1 - \sum_{k=0}^{K-1} count_k ** 2
     */
+
+    Gini(NClassesRef n_classes)
+    : ClassificationCriterion(n_classes)
+    {}
 
     virtual double node_impurity() const override;
         /* Evaluate the impurity of the current node, i.e. the impurity of
@@ -414,6 +422,11 @@ class MSE
 
         MSE = var_left + var_right
     */
+public:
+    MSE(SIZE_t n_outputs)
+    : RegressionCriterion(n_outputs)
+    {}
+
     virtual double node_impurity() const override;
         /* Evaluate the impurity of the current node, i.e. the impurity of
            samples[start:end].*/
@@ -434,6 +447,10 @@ class FriedmanMSE
         diff = mean_left - mean_right
         improvement = n_left * n_right * diff^2 / (n_left + n_right)
     */
+public:
+    FriedmanMSE(SIZE_t n_outputs)
+    : MSE(n_outputs)
+    {}
 
     virtual double impurity_improvement(double impurity) const override;
 };
@@ -603,6 +620,9 @@ public:
 class BestSplitter
 : public BaseDenseSplitter {
     /* Splitter for finding the best split.*/
+
+    using BaseDenseSplitter::BaseDenseSplitter;
+
     virtual void node_split(double impurity, SplitRecord* split,
                          SIZE_t* n_constant_features) override;
         /* Find the best split on node samples[start:end].*/
@@ -612,6 +632,9 @@ class BestSplitter
 class RandomSplitter
 : public BaseDenseSplitter {
     /* Splitter for finding the best random split.*/
+
+    using BaseDenseSplitter::BaseDenseSplitter;
+
     virtual void node_split(double impurity, SplitRecord* split,
                          SIZE_t* n_constant_features) override;
         /* Find the best random split on node samples[start:end].*/
@@ -627,6 +650,7 @@ class PresortBestSplitter
     SIZE_t n_total_samples;
     std::vector<bool> sample_mask;
 
+public:
     PresortBestSplitter(Criterion* criterion, SIZE_t max_features,
                   SIZE_t min_samples_leaf,
                   double min_weight_leaf,

@@ -8,6 +8,10 @@
 //          Hamzeh Alsalhi <ha258@cornell.edu>
 // License: BSD 3 clause
 
+#include "sklearn/pythonemu/errors.h"
+#include "sx/utility.h"
+#include "sx/algorithm.h"
+
 namespace sklearn {
     
 #if 0
@@ -157,12 +161,14 @@ public:
         y : array-like of shape [n_samples]
         */
         if(classes_.empty())
-            throw NotFittedError(stringf("LabelEncoder 0x%p is not fitted", this));
+            throw NotFittedError(sx::stringf("LabelEncoder 0x%p is not fitted", this));
 
         auto classes = sx::sort_unique_range(make_vector(y));
-        if(length(set_intersection_inplace(make_vector(classes), this->classes_)) < length(classes)) {
-            auto diff = set_difference_inplace(make_vector(classes), this->classes_);
-            throw ValueError(stringf("y contains new labels: %s", mat2str(diff).c_str()));
+        if(sx::length(sx::set_intersection_range(classes, this->classes_)) < sx::length(classes)) {
+
+            auto diff = sx::set_difference_range(classes, this->classes_);
+
+            throw ValueError(sx::stringf("y contains new labels: %s", sx::mat2str(diff).c_str()));
         }
         return sx::searchsorted<EncodedType>(this->classes_, y);
     }

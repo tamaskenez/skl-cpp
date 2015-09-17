@@ -301,9 +301,9 @@ protected:
         if(!criterion) {
             if(self.is_classification) {
                 if(self.criterion.is_string("gini"))
-                    local_criterion_object = std::make_unique<Gini>(self.n_outputs_, self.n_classes_);
+                    local_criterion_object = std::make_unique<Gini>(self.n_classes_);
                 else if(self.criterion.is_string("entropy"))
-                    local_criterion_object = std::make_unique<Entropy>(self.n_outputs_, self.n_classes_);
+                    local_criterion_object = std::make_unique<Entropy>(self.n_classes_);
                 else
                     throw std::runtime_error("Classiciation criterion preset can be only gini, entropy");
             } else {
@@ -327,21 +327,21 @@ protected:
             if(self.splitter.is_string("best"))
                 local_splitter_object = std::make_unique<BestSplitter>(
                     criterion, self.max_features_, self.min_samples_leaf,
-                    min_weight_leaf, random_state);
+                    min_weight_leaf, &random_state);
             else if(self.splitter.is_string("presort_best"))
                 local_splitter_object = std::make_unique<PresortBestSplitter>(
                     criterion, self.max_features_, self.min_samples_leaf,
-                    min_weight_leaf, random_state);
+                    min_weight_leaf, &random_state);
             else if(self.splitter.is_string("random"))
                 local_splitter_object = std::make_unique<RandomSplitter>(
                     criterion, self.max_features_, self.min_samples_leaf,
-                    min_weight_leaf, random_state);
+                    min_weight_leaf, &random_state);
             else
                 throw std::runtime_error("Splitter preset can be only best, presort-best, random");
             splitter = local_splitter_object.get();
         }
 
-        self.tree_ = std::make_unique<Tree>(self.n_features_, self.n_classes_, self.n_outputs_);
+        self.tree_ = std::make_unique<Tree>(self.n_features_, self.n_classes_);
 
         // Use BestFirst if max_leaf_nodes given; use DepthFirst otherwise
         std::unique_ptr<TreeBuilder> builder;
