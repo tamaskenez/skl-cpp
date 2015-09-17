@@ -133,7 +133,7 @@ public:
         -------
         y : array-like of shape [n_samples]
         */
-        this->classes_ = sx::sort_unique_inplace(make_vector(y));
+        this->classes_ = sx::sort_unique_range(make_vector(y));
         std::vector<EncodedType> yresult;
         yresult.reserve(y.size());
         for(auto&v: y) {
@@ -159,7 +159,7 @@ public:
         if(classes_.empty())
             throw NotFittedError(stringf("LabelEncoder 0x%p is not fitted", this));
 
-        auto classes = sx::sort_unique_inplace(make_vector(y));
+        auto classes = sx::sort_unique_range(make_vector(y));
         if(length(set_intersection_inplace(make_vector(classes), this->classes_)) < length(classes)) {
             auto diff = set_difference_inplace(make_vector(classes), this->classes_);
             throw ValueError(stringf("y contains new labels: %s", mat2str(diff).c_str()));

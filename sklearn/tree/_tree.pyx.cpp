@@ -207,7 +207,7 @@ impurity_improvement(double impurity) const {
                 auto yik = y[{i, k}];
                 auto c = (SIZE_t)yik;
                 assert(c == yik);
-                label_count_total[n_classes.idx(k, c)] += w;
+                label_count_total[n_classes.offset(k, c)] += w;
             }
             weighted_n_node_samples += w;
         }
@@ -246,7 +246,7 @@ impurity_improvement(double impurity) const {
                 auto yik = y[{i, k}];
                 auto c = (SIZE_t)yik;
                 assert(c == yik);
-                auto idx = n_classes.idx(k, c);
+                auto idx = n_classes.offset(k, c);
                 label_count_left[idx] += w;
                 label_count_right[idx] -= w;
             }
@@ -273,7 +273,7 @@ impurity_improvement(double impurity) const {
             double entropy = 0.0;
 
             for(auto c: range(n_classes.count(k))) {
-                double count_k = label_count_total[n_classes.idx(k, c)];
+                double count_k = label_count_total[n_classes.offset(k, c)];
                 if(count_k > 0.0) {
                     count_k /= weighted_n_node_samples;
                     entropy -= count_k * log(count_k);
@@ -295,7 +295,7 @@ impurity_improvement(double impurity) const {
             double entropy_right = 0.0;
 
             for(auto c: range(n_classes.count(k))) {
-                auto idx = n_classes.idx(k, c);
+                auto idx = n_classes.offset(k, c);
                 auto count_k = label_count_left[idx];
                 if(count_k > 0.0) {
                     count_k /= weighted_n_left;
@@ -322,7 +322,7 @@ impurity_improvement(double impurity) const {
             auto gini = 0.0;
 
             for(auto c: range(n_classes.count(k))) {
-                auto count_k = label_count_total[n_classes.idx(k, c)];
+                auto count_k = label_count_total[n_classes.offset(k, c)];
                 gini += count_k * count_k;
             }
             gini = 1.0 - gini / (weighted_n_node_samples *
@@ -344,7 +344,7 @@ impurity_improvement(double impurity) const {
             auto gini_right = 0.0;
 
             for(auto c: range(n_classes.count(k))) {
-                auto idx = n_classes.idx(k, c);
+                auto idx = n_classes.offset(k, c);
                 auto count_k = label_count_left[idx];
                 gini_left += count_k * count_k;
 

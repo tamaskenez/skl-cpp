@@ -24,11 +24,15 @@ namespace sklearn {
     using sx::array_view;
     using sx::matrix_view;
 
-template<typename OutputValue>
+template<typename OutputValue1, typename OutputValue2, typename OutputValue3>
 std::vector<double> compute_class_weight(
-    const class_weight_union<OutputValue>& class_weight, int output_idx,
-    array_view<const OutputValue> classes,
-    array_view<const OutputValue> y) {
+    const class_weight_union<OutputValue1>& class_weight, int output_idx,
+    array_view<OutputValue2> classes,
+    array_view<OutputValue3> y) {
+
+    using OutputValue = std::remove_const_t<OutputValue1>;
+    static_assert(std::is_same<OutputValue, std::remove_const_t<OutputValue2>>::value, "All output value type must be the same (aside from constness)");
+    static_assert(std::is_same<OutputValue, std::remove_const_t<OutputValue3>>::value, "All output value type must be the same (aside from constness)");
     /*Estimate class weights for unbalanced datasets.
 
     Parameters
@@ -76,8 +80,10 @@ std::vector<double> compute_class_weight(
 
         // inversely proportional to the number of samples in the class
         if(class_weight.is_string("auto")) {
-            auto recip_freq = 1.0 / y_ind;
-            weight = view::take_at(recip_freq, le.transform(classes)) / sx::mean(recip_freq);
+            auto recip_freq = sx::scalar_div_range(1.0, sx::make_vector<double>(y_ind));
+            weight = sx::range_div_scalar(
+                sx::make_vector(view::take_at(recip_freq, le.transform(classes)))
+                , sx::mean(recip_freq));
         } else {
             auto recip_freq = length(y) / ((double)length(le.classes_) *
                                    bincount(y_ind));
@@ -169,8 +175,7 @@ std::vector<double> compute_sample_weight(
     for(auto k: range(n_outputs)) {
 
         auto y_full = y(sx::all, k);
-        auto classes_full = sx::make_vector(y_full);
-        sx::sort_unique_inplace(classes_full);
+        auto classes_full = sx::sort_unique_range(make_vector(y_full));
         std::vector<OutputValue> classes_missing;
 
         std::vector<double> weight_k;
@@ -179,8 +184,8 @@ std::vector<double> compute_sample_weight(
             // Get class weights for the subsample, covering all classes in
             // case some labels that were present in the original data are
             // missing from the sample.
-            auto y_subsample = view::take_at(y(sx::all, k), indices);
-            auto classes_subsample = sx::sort_unique_inplace(make_vector(y_subsample));
+            auto y_subsample = make_vector(view::take_at(y(sx::all, k), indices));
+            auto classes_subsample = sx::sort_unique_range(sx::make_vector(y_subsample));
 
             auto indices_of_classes_full_in_classes_subsample = sx::searchsorted<Index>(
                 classes_subsample,
@@ -188,8 +193,8 @@ std::vector<double> compute_sample_weight(
 
             auto computed_class_weight =
                 compute_class_weight(class_weight, k,
-                                     classes_subsample,
-                                     y_subsample);
+                                     sx::make_array_view(classes_subsample),
+                                     sx::make_array_view(y_subsample));
 
             weight_k = sx::make_vector(
                 view::take_at(
@@ -198,11 +203,11 @@ std::vector<double> compute_sample_weight(
                 )
             );
 
-            auto classes_missing = set_difference(
+            auto classes_missing = sx::set_difference_range(
                                                   sx::make_vector(classes_full), classes_subsample);
         } else {
             weight_k = compute_class_weight(class_weight, k,
-                                            classes_full,
+                                            sx::make_array_view(classes_full),
                                             y_full);
         }
 
@@ -222,9 +227,9 @@ std::vector<double> compute_sample_weight(
                     weight_k[idx] = 0;
             }
         }
-        assert(y.extents[0] == expanded_class_weight.size());
-        assert(y.extents[0] == weight_k.size());
-        for(auto idx: range(y.extents[0]))
+        assert(y.extents(0) == expanded_class_weight.size());
+        assert(y.extents(0) == weight_k.size());
+        for(auto idx: range(y.extents(0)))
             expanded_class_weight[idx] *= weight_k[idx];
     } //for all outputs
 

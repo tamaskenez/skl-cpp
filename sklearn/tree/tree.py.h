@@ -188,8 +188,9 @@ protected:
             y_store_unique_indices.assign(y.extents(), sx::array_layout::c_order, 0.0);
             std::vector<double> v;
             for(auto k: range(self.n_outputs_)) {
-                v.assign(BEGINEND(y(sx::all, k)));
-                sx::sort_unique_inplace(v);
+                auto yv = y(sx::all, k);
+                v.assign(BEGINEND(yv));
+                sx::sort_unique_range(v);
                 self.classes_.emplace_back(v);
                 self.n_classes_.push_back(v.size());
                 for(auto ix: range(y.extents(0))) {
@@ -241,6 +242,7 @@ protected:
         self.max_features_ = max_features;
 
         using sx::stringf;
+        using sx::length;
 
         if(y.extents(0) != n_samples)
             throw ValueError(stringf("Number of labels=%d does not match "
@@ -269,7 +271,7 @@ protected:
         if(!sx::isempty(expanded_class_weight)) {
             if(!isempty(sample_weight)) {
                 std::vector<double> updated_sample_weight(BEGINEND(sample_weight));
-                assert(length(sample_weight) == sx::length(expanded_class_weight));
+                assert(length(sample_weight) == length(expanded_class_weight));
                 for(auto i: range(length(sample_weight)))
                     updated_sample_weight[i] *= expanded_class_weight[i];
                 sample_weight = updated_sample_weight;
@@ -407,15 +409,18 @@ protected:
         auto proba = self.tree_->predict(X);
         auto n_samples = X.extents(0);
 
+        using sx::length;
+
+        namespace view = ranges::view;
         // Classification
         if(is_classification) {
             matrix<DOUBLE_t> predictions({n_samples, self.n_outputs_}, sx::array_layout::c_order);
 
             for(auto k: range(self.n_outputs_)) {
                 predictions(sx::all, k) <<=
-                take_at(self.classes_[k],
+                view::take_at(self.classes_[k],
                     sx::indmax_along(
-                        proba(sx::all, {n_classes_.offset(k), sx::length = n_classes_.count(k)})
+                        proba(sx::all, {n_classes_.offset(k), length = n_classes_.count(k)})
                         , 1
                     )
                 );
