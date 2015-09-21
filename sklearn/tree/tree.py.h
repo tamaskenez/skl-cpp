@@ -101,12 +101,16 @@ private:
     const bool is_classification;
     const class_weight_union<DOUBLE_t> class_weight;
     SIZE_t n_features_ = 0;
-    SIZE_t n_outputs_ = 0;
-    std::vector<std::vector<DOUBLE_t>> classes_; //classes_[output_idx]
-    NClasses n_classes_; //n_classes_[output_idx]
-    SIZE_t max_features_ = 0;
-    std::unique_ptr<Tree> tree_;
 protected:
+    SIZE_t n_outputs_ = 0;
+private:
+    std::vector<std::vector<DOUBLE_t>> classes_; //classes_[output_idx]
+protected:
+    NClasses n_classes_; //n_classes_[output_idx]
+private:
+    SIZE_t max_features_ = 0;
+protected:
+    std::unique_ptr<Tree> tree_;
     BaseDecisionTree(
                  criterion_union&& criterion,
                  splitter_union&& splitter,
@@ -479,12 +483,15 @@ protected:
         return this->tree_->compute_feature_importances();
     }
 };
-#if 0
+
 // =============================================================================
 // Public estimators
 // =============================================================================
 
-class DecisionTreeClassifier(BaseDecisionTree, ClassifierMixin):
+class DecisionTreeClassifier
+: public BaseDecisionTree {
+//ClassifierMixin)
+
     /*A decision tree classifier.
 
     Read more in the :ref:`User Guide <tree>`.
@@ -619,30 +626,31 @@ class DecisionTreeClassifier(BaseDecisionTree, ClassifierMixin):
     array([ 1.     ,  0.93...,  0.86...,  0.93...,  0.93...,
             0.93...,  0.93...,  1.     ,  0.93...,  1.      ])
     */
-    def __init__(self,
-                 criterion="gini",
-                 splitter="best",
-                 max_depth=None,
-                 min_samples_split=2,
-                 min_samples_leaf=1,
-                 min_weight_fraction_leaf=0.,
-                 max_features=None,
-                 random_state=None,
-                 max_leaf_nodes=None,
-                 class_weight=None):
-        super(DecisionTreeClassifier, self).__init__(
-            criterion=criterion,
-            splitter=splitter,
-            max_depth=max_depth,
-            min_samples_split=min_samples_split,
-            min_samples_leaf=min_samples_leaf,
-            min_weight_fraction_leaf=min_weight_fraction_leaf,
-            max_features=max_features,
-            max_leaf_nodes=max_leaf_nodes,
-            class_weight=class_weight,
-            random_state=random_state)
-
-    def predict_proba(self, X, check_input=True):
+    DecisionTreeClassifier(
+                 criterion_union criterion = "gini",
+                 splitter_union splitter = "best",
+                 SIZE_t max_depth = 0,
+                 SIZE_t min_samples_split=2,
+                 SIZE_t min_samples_leaf=1,
+                 double min_weight_fraction_leaf=0.,
+                 max_features_union max_features = 0,
+                 std::default_random_engine random_state = std::default_random_engine(),
+                 SIZE_t max_leaf_nodes=0,
+                 class_weight_union<DOUBLE_t> class_weight = nullptr)
+                 : BaseDecisionTree(
+                 std::move(criterion),
+                 std::move(splitter),
+                 max_depth,
+                 min_samples_split,
+                 min_samples_leaf,
+                 min_weight_fraction_leaf,
+                 max_features,
+                 max_leaf_nodes,
+                 random_state,
+                 true,
+                 std::move(class_weight)
+                 ) {}
+sx::matrix<DOUBLE_t> predict_proba(matrix_view<const DTYPE_t> X, bool check_input=true) {
         /*Predict class probabilities of the input samples X.
 
         The predicted class probability is the fraction of samples of the same
@@ -666,30 +674,24 @@ class DecisionTreeClassifier(BaseDecisionTree, ClassifierMixin):
             The class probabilities of the input samples. The order of the
             classes corresponds to that in the attribute `classes_`.
         */
-        X = self._validate_X_predict(X, check_input)
-        proba = self.tree_.predict(X)
+        auto&self=*this;
+        _validate_X_predict(X, check_input);
+        auto proba = self.tree_->predict(X);
 
-        if self.n_outputs_ == 1:
-            proba = proba[:, :self.n_classes_]
-            normalizer = proba.sum(axis=1)[:, np.newaxis]
-            normalizer[normalizer == 0.0] = 1.0
-            proba /= normalizer
-
-            return proba
-
-        else:
-            all_proba = []
-
-            for k in range(self.n_outputs_):
-                proba_k = proba[:, k, :self.n_classes_[k]]
-                normalizer = proba_k.sum(axis=1)[:, np.newaxis]
-                normalizer[normalizer == 0.0] = 1.0
-                proba_k /= normalizer
-                all_proba.append(proba_k)
-
-            return all_proba
-
-    def predict_log_proba(self, X):
+        for(auto k: range(self.n_outputs_)) {
+            auto proba_k = proba(
+                sx::all
+                , {self.n_classes_.offset(k), sx::length = n_classes_.count(k)});
+            for(auto r: range(proba_k.extents(0))) {
+                auto proba_rk = proba_k(r, sx::all);
+                auto normalizer = sum(proba_rk);
+                if (normalizer == 0.0) normalizer = 1.0;
+                range_div_scalar(proba_rk, normalizer);
+            }
+        }
+        return proba;
+    }
+    sx::matrix<DOUBLE_t> predict_log_proba(array_view<const DTYPE_t, 2> X) {
         /*Predict class log-probabilities of the input samples X.
 
         Parameters
@@ -706,19 +708,12 @@ class DecisionTreeClassifier(BaseDecisionTree, ClassifierMixin):
             The class log-probabilities of the input samples. The order of the
             classes corresponds to that in the attribute `classes_`.
         */
-        proba = self.predict_proba(X)
+        return log(this->predict_proba(X));
+    }
+};
 
-        if self.n_outputs_ == 1:
-            return np.log(proba)
-
-        else:
-            for k in range(self.n_outputs_):
-                proba[k] = np.log(proba[k])
-
-            return proba
-
-
-class DecisionTreeRegressor(BaseDecisionTree, RegressorMixin):
+class DecisionTreeRegressor
+: public BaseDecisionTree { //, RegressorMixin):
     /*A decision tree regressor.
 
     Read more in the :ref:`User Guide <tree>`.
@@ -830,28 +825,30 @@ class DecisionTreeRegressor(BaseDecisionTree, RegressorMixin):
     array([ 0.61..., 0.57..., -0.34..., 0.41..., 0.75...,
             0.07..., 0.29..., 0.33..., -1.42..., -1.77...])
     */
-    def __init__(self,
-                 criterion="mse",
-                 splitter="best",
-                 max_depth=None,
-                 min_samples_split=2,
-                 min_samples_leaf=1,
-                 min_weight_fraction_leaf=0.,
-                 max_features=None,
-                 random_state=None,
-                 max_leaf_nodes=None):
-        super(DecisionTreeRegressor, self).__init__(
-            criterion=criterion,
-            splitter=splitter,
-            max_depth=max_depth,
-            min_samples_split=min_samples_split,
-            min_samples_leaf=min_samples_leaf,
-            min_weight_fraction_leaf=min_weight_fraction_leaf,
-            max_features=max_features,
-            max_leaf_nodes=max_leaf_nodes,
-            random_state=random_state)
+         DecisionTreeRegressor(
+                 criterion_union criterion = "mse",
+                 splitter_union splitter="best",
+                 SIZE_t max_depth=0,
+                 SIZE_t min_samples_split=2,
+                 SIZE_t min_samples_leaf=1,
+                 SIZE_t min_weight_fraction_leaf=0.,
+                 max_features_union max_features=0,
+                 std::default_random_engine random_state=std::default_random_engine(),
+                 SIZE_t max_leaf_nodes=0)
+                 :BaseDecisionTree(
+            std::move(criterion),
+            std::move(splitter),
+            max_depth,
+            min_samples_split,
+            min_samples_leaf,
+            min_weight_fraction_leaf,
+            max_features,
+            max_leaf_nodes,
+            random_state,
+            false){}
+};
 
-
+#if 0
 class ExtraTreeClassifier(DecisionTreeClassifier):
     /*An extremely randomized tree classifier.
 
